@@ -9,6 +9,7 @@ artifacts/*.zip
 artifacts/portable/
 artifacts/native-smoke.json
 artifacts/SHA256SUMS.txt
+artifacts/release-v*/
 
 artifacts/ui-test/
 artifacts/legacy-previews/

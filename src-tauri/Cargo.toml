@@ -1,6 +1,6 @@
 [package]
 name = "chatgpt-hud"
-version = "0.2.0"
+version = "0.2.3"
 description = "A read-only quota HUD for Cockpit Tools"
 edition = "2021"
 publish = false

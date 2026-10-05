@@ -42,6 +42,7 @@ export async function call<M extends keyof MethodMap>(method: M, params: MethodM
 }
 
 interface InternalMethods {
+  window_layout: { params: { collapsed: boolean; width: number; height: number }; data: { accepted: boolean } };
   docs_open: { params: Record<string, never>; data: { opened: boolean } };
   theme_export: { params: Record<string, never>; data: { cancelled: boolean } };
   source_get: { params: Record<string, never>; data: { path: string | null } };

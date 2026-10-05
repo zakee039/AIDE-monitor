@@ -101,11 +101,32 @@ pub fn parse_usage(
             observed_at,
         ),
     ];
+    // Some plans return a weekly window with the other slot absent/null.
+    // Only a recognized, measured weekly window establishes this shape;
+    // a malformed present slot must remain unknown.
+    let weekly_only = windows
+        .iter()
+        .any(|window| window.duration_seconds == Some(604_800) && window.measurement == "percent")
+        && ["primary", "secondary"].iter().any(|kind| {
+            rate.and_then(|rate| rate.get(format!("{kind}_window")))
+                .is_none_or(Value::is_null)
+        });
+    if weekly_only {
+        for (window, kind) in windows.iter_mut().zip(["primary", "secondary"]) {
+            if rate
+                .and_then(|rate| rate.get(format!("{kind}_window")))
+                .is_none_or(Value::is_null)
+            {
+                window.applicability = "not_applicable".into();
+            }
+        }
+    }
     let base_coverage_complete = windows.iter().all(|window| {
-        window.applicability == "required"
-            && window.measurement == "percent"
-            && window.remaining_percent.is_some()
-            && window.duration_seconds.is_some()
+        window.applicability == "not_applicable"
+            || (window.applicability == "required"
+                && window.measurement == "percent"
+                && window.remaining_percent.is_some()
+                && window.duration_seconds.is_some())
     });
     let has_exhausted = windows.iter().any(|window| window.exhausted == Some(true));
     let raw_allowed = rate
@@ -399,6 +420,58 @@ mod tests {
             assert_eq!(quota.windows[0].measurement, "unknown");
             assert_eq!(quota.windows[0].remaining_percent, None);
             assert_eq!(quota.windows[1].applicability, "unknown");
+        }
+    }
+
+    #[test]
+    fn weekly_only_accounts_omit_null_or_absent_five_hour_limits() {
+        for (known, absent) in [
+            ("primary_window", "secondary_window"),
+            ("secondary_window", "primary_window"),
+        ] {
+            for null in [true, false] {
+                let mut value = json!({"rate_limit":{"allowed":true,"limit_reached":false}});
+                value["rate_limit"][known] = json!({"used_percent":23,"limit_window_seconds":604800,"reset_after_seconds":86400});
+                if null {
+                    value["rate_limit"][absent] = Value::Null;
+                }
+                let q = parse_usage(&value, "synthetic", observed()).unwrap();
+                assert!(q.base_coverage_complete);
+                assert_eq!(
+                    q.windows
+                        .iter()
+                        .filter(|w| w.applicability == "required")
+                        .count(),
+                    1
+                );
+                assert_eq!(crate::domain::evaluate(&q, observed()).state, "now");
+                value["rate_limit"][known]["used_percent"] = json!(100);
+                value["rate_limit"]["allowed"] = json!(false);
+                value["rate_limit"]["limit_reached"] = json!(true);
+                let q = parse_usage(&value, "synthetic", observed()).unwrap();
+                assert_eq!(
+                    crate::domain::evaluate(&q, observed()).estimated_available_at,
+                    Some(
+                        (observed() + Duration::seconds(86400))
+                            .to_rfc3339_opts(SecondsFormat::Millis, true)
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_other_limit_is_not_mistaken_for_weekly_only() {
+        for other in [
+            json!({}),
+            json!({"used_percent":"unknown","limit_window_seconds":18000}),
+        ] {
+            let value = json!({"rate_limit":{"allowed":true,"limit_reached":false,
+                "primary_window":other,"secondary_window":{"used_percent":23,"limit_window_seconds":604800,"reset_after_seconds":86400}}});
+            let q = parse_usage(&value, "synthetic", observed()).unwrap();
+            assert!(!q.base_coverage_complete);
+            assert_eq!(q.windows[0].applicability, "required");
+            assert_eq!(crate::domain::evaluate(&q, observed()).state, "unknown");
         }
     }
 

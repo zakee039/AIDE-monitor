@@ -179,12 +179,31 @@ impl Default for SourceStatus {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TotalQuota {
+    pub percent: Option<f64>,
+    pub partial: bool,
+    pub weekly_scale_percent: f64,
+}
+
+impl Default for TotalQuota {
+    fn default() -> Self {
+        Self {
+            percent: None,
+            partial: false,
+            weekly_scale_percent: 15.0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     pub source: SourceStatus,
     pub accounts: Vec<AccountSummary>,
     pub quotas: Vec<AccountQuota>,
     pub availability: Vec<AccountAvailability>,
     pub recommendation: Recommendation,
+    pub total_quota: TotalQuota,
     pub next_refresh_at: Option<String>,
 }
 
@@ -196,6 +215,7 @@ impl Default for Snapshot {
             quotas: Vec::new(),
             availability: Vec::new(),
             recommendation: Recommendation::empty(),
+            total_quota: TotalQuota::default(),
             next_refresh_at: None,
         }
     }

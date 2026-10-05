@@ -32,6 +32,7 @@ fn main() {
         "hud_internal_source_choose",
         "hud_internal_source_rescan",
         "hud_internal_theme_get",
+        "hud_internal_window_layout",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

@@ -104,6 +104,7 @@ export interface Snapshot {
   quotas: AccountQuota[];
   availability: AccountAvailability[];
   recommendation: Recommendation;
+  totalQuota?: { percent: number | null; partial: boolean; weeklyScalePercent: number }; // Estimate; 15% is a local heuristic.
   nextRefreshAt: UtcTime | null;
 }
 

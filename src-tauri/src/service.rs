@@ -422,12 +422,14 @@ impl Service {
             .map(|q| domain::evaluate(q, now))
             .collect::<Vec<_>>();
         let recommendation = domain::recommend(&accounts, &availability, &quotas);
+        let total_quota = domain::total_quota(&accounts, &quotas, now);
         Snapshot {
             source: d.source.clone(),
             accounts,
             quotas,
             availability,
             recommendation,
+            total_quota,
             next_refresh_at: if d.config.settings.auto_refresh {
                 Some(
                     (now + chrono::Duration::from_std(

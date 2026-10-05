@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chatgpt HUD — API reference</title>
 <style>body{margin:0;background:#faf6ec;color:#293b38;font:16px/1.7 system-ui,sans-serif}main{max-width:1040px;margin:40px auto;padding:24px}a{color:#237b74}h1{font-size:38px}h2{margin-top:38px}code,pre{font-family:Consolas,monospace;background:#eeeee4;border-radius:5px}code{padding:2px 5px}pre{padding:20px;overflow:auto}table{border-collapse:collapse;width:100%;background:#fffdf6}td,th{text-align:left;padding:13px;border-bottom:1px solid #dedfd4;vertical-align:top}header{border-top:4px solid #39c5bb}.tag{color:#25786e}small{color:#63736e}button{float:right;padding:8px 16px;border:1px solid #abc0b6;background:#f3fcf5;border-radius:7px;cursor:pointer}[hidden]{display:none}</style>
-<main><header><button onclick="setLanguage(document.documentElement.lang==='en'?'zh-CN':'en')">English / 中文</button><p class="tag">Chatgpt HUD · 0.2.0 · API 1.0</p><h1>API reference <small>/ 接口说明</small></h1></header>
-<p data-en>These methods are available to the app's trusted Tauri windows. Version 0.2.0 does not expose an HTTP server or grant external webpages access. Themes are validated JSON data, not executable plugins.</p>
-<p data-zh hidden>这些方法通过应用内 Tauri 接口向受信任窗口提供。0.2.0 尚未开放 HTTP 服务，外部网页不能直接调用。主题为经过校验的 JSON 数据，不执行插件代码。</p>
+<main><header><button onclick="setLanguage(document.documentElement.lang==='en'?'zh-CN':'en')">English / 中文</button><p class="tag">Chatgpt HUD · 0.2.3 · API 1.0</p><h1>API reference <small>/ 接口说明</small></h1></header>
+<p data-en>These methods are available to the app's trusted Tauri windows. Version 0.2.3 does not expose an HTTP server or grant external webpages access. Themes are validated JSON data, not executable plugins.</p>
+<p data-zh hidden>这些方法通过应用内 Tauri 接口向受信任窗口提供。0.2.3 尚未开放 HTTP 服务，外部网页不能直接调用。主题为经过校验的 JSON 数据，不执行插件代码。</p>
 <h2>Call a method / 调用方法</h2><pre>import { invoke } from '@tauri-apps/api/core';
 const result = await invoke('hud_v1_quota_snapshot_get', { request: {} });
 if (result.ok) console.log(result.data.recommendation);
@@ -18,7 +18,7 @@ else console.error(result.error.code);
 <tr><td>accounts.list</td><td>{}</td><td>Accounts without credentials / 账号列表，不含凭据</td></tr>
 <tr><td>accounts.selection.update ★</td><td>expectedRevision, accountIds, aliases?</td><td>Persist selection and order / 保存选择与顺序</td></tr>
 <tr><td>accounts.alias.update ★</td><td>accountId, alias</td><td>Save display name; empty restores original, max 80 characters / 保存别名，空值恢复原名，上限 80 字符</td></tr>
-<tr><td>quota.snapshot.get</td><td>{}</td><td>Accounts, quota windows, availability, recommendation and source / 完整配额快照</td></tr>
+<tr><td>quota.snapshot.get</td><td>{}</td><td>Accounts, quota windows, availability, recommendation, totalQuota and source / 完整配额快照与估算总额度</td></tr>
 <tr><td>recommendation.get</td><td>{}</td><td>Recommended account and estimated availability / 推荐账号与预计可用时间</td></tr>
 <tr><td>refresh.request</td><td>accountIds? (omit for selected accounts)</td><td>Asynchronous refresh ticket / 异步刷新任务；省略账号则刷新已选账号</td></tr>
 <tr><td>refresh.status.get</td><td>jobId</td><td>Refresh job progress / 刷新进度</td></tr>
@@ -32,6 +32,14 @@ else console.error(result.error.code);
 <tr><td>window.control</td><td>action: show | hide | restore_position | open_settings</td><td>accepted / 窗口操作</td></tr>
 <tr><td>diagnostics.get ★</td><td>{}</td><td>Versions and sanitized status / 版本与脱敏诊断信息</td></tr>
 </tbody></table>
+<h2>Estimated total / 估算总额度</h2>
+<pre>snapshot.totalQuota = {
+  percent: 52,             // null if no reliable balance is known
+  partial: false,          // true when selected accounts are excluded
+  weeklyScalePercent: 15   // local heuristic, not an official conversion
+};</pre>
+<p data-en>Dual-limit accounts contribute <code>H × min(W / 15, 1)</code>; weekly-only accounts contribute W. H and W are remaining percentages. Totals may exceed 100%. Stale, failed and unconfirmed samples are excluded. Recommendation floors (5h ≥ 5%, weekly ≥ 2%) are separate. The folded HUD displays the earliest usable countdown when the complete, known total is zero.</p>
+<p data-zh hidden>双限额账号贡献 <code>H × min(W / 15, 1)</code>，单周限额账号贡献 W；H/W 为剩余百分比，总量允许超过 100%。过期、失败、等待核实的数据不计入。推荐阈值（5H ≥ 5%、周 ≥ 2%）单独计算。完整可信总量为零时，折叠圆球显示最近可用倒计时。</p>
 <h2>Events / 事件</h2><pre>import { listen } from '@tauri-apps/api/event';
 const stop = await listen('hud://v1/event', ({ payload }) =&gt; {
   // Refetch the relevant authoritative snapshot/settings.

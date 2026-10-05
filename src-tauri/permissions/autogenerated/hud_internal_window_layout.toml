@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-hud-internal-window-layout"
+description = "Enables the hud_internal_window_layout command without any pre-configured scope."
+commands.allow = ["hud_internal_window_layout"]
+
+[[permission]]
+identifier = "deny-hud-internal-window-layout"
+description = "Denies the hud_internal_window_layout command without any pre-configured scope."
+commands.deny = ["hud_internal_window_layout"]

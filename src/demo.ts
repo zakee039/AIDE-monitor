@@ -19,6 +19,12 @@ const refreshing = new Set<string>();
 const jobs = new Map<string, RefreshJob>();
 const resets = [35 * 60, 8 * 3600, 3 * 86400, 5 * 86400];
 const baseTime = Date.now();
+// Development-only visual fixtures. Production desktop data always comes from Rust.
+const scenario = import.meta.env.DEV ? new URLSearchParams(location.search).get("scenario") : null;
+if (scenario && ["scaled", "weekly", "mixed", "total", "zero", "low"].includes(scenario)) {
+  accounts = accounts.map((account, index) => ({ ...account, selected: index < 2 }));
+}
+if (scenario?.startsWith("orb-")) accounts = accounts.map((account, index) => ({ ...account, selected: index === 0 }));
 
 function result<T>(data: T): ApiResult<T> {
   return { apiVersion: "1.0", instanceId, revision, requestId: crypto.randomUUID(), generatedAt: new Date().toISOString(), ok: true, data };
@@ -56,17 +62,57 @@ export function demoSnapshot(): Snapshot {
       ],
     };
   });
-  const available = selected.find(account => account.id !== "demo-studio" && account.id !== "demo-work");
-  const waiting = selected.find(account => account.id === "demo-studio");
+  if (scenario) {
+    for (const [index, quota] of quotas.entries()) {
+      const hourly = scenario === "total" ? 100 : index === 0 ? 52 : 49;
+      const weekly = scenario === "zero" ? 0 : scenario === "scaled" && index === 1 ? 0 : scenario === "low" ? 7.5 : scenario === "total" ? index === 0 ? 15 : 7.5 : index === 0 ? 77 : 49;
+      const weeklyOnly = scenario === "weekly" || scenario === "mixed" && index === 1;
+      quota.windows[0].remainingPercent = hourly;
+      quota.windows[0].exhausted = false;
+      quota.windows[1].remainingPercent = weekly;
+      quota.windows[1].exhausted = weekly === 0;
+      if (weeklyOnly) {
+        quota.windows[0].applicability = "not_applicable";
+        // Exercise primary-slot weekly limits as well as secondary-slot weekly limits.
+        if (index === 0) {
+          const week = quota.windows[1];
+          quota.windows = [{ ...week, id: "primary", kind: "primary" }, { ...quota.windows[0], id: "secondary", kind: "secondary" }];
+        }
+      }
+      quota.providerAllowed = weekly > 0;
+      quota.blockingReason = weekly === 0 ? "quota_windows" : "none";
+      if (scenario.startsWith("orb-")) {
+        const waitMinutes = scenario === "orb-short" ? 16 : scenario === "orb-day" ? 3 * 1440 + 16 * 60 : 3 * 60 + 16;
+        const isWaiting = scenario !== "orb-percent";
+        quota.windows[0].remainingPercent = isWaiting ? 0 : 14;
+        quota.windows[0].exhausted = isWaiting;
+        quota.windows[0].resetsAt = new Date(baseTime + waitMinutes * 60000).toISOString();
+        quota.windows[1].remainingPercent = 100;
+        quota.windows[1].exhausted = false;
+        quota.providerAllowed = !isWaiting;
+        quota.blockingReason = isWaiting ? "quota_windows" : "none";
+      }
+    }
+  }
+  const availability: Snapshot["availability"] = quotas.map(quota => {
+    if (quota.freshness !== "fresh" || quota.origin !== "network") return { accountId: quota.accountId, state: "unknown", reason: "stale", estimatedAvailableAt: null };
+    const blocked = quota.windows.filter(window => window.applicability === "required" && (window.remainingPercent ?? 0) < (window.durationSeconds === 18000 ? 5 : 2));
+    return { accountId: quota.accountId, state: blocked.length ? "waiting" : "now", reason: blocked.some(window => window.exhausted) ? "quota_exhausted" : blocked.length ? "below_threshold" : "available", estimatedAvailableAt: blocked.length ? new Date(Math.max(...blocked.map(window => Date.parse(window.resetsAt!)))).toISOString() : null };
+  });
+  const available = selected.find(account => availability.find(item => item.accountId === account.id)?.state === "now");
+  const waiting = availability.filter(item => item.state === "waiting").sort((a, b) => Date.parse(a.estimatedAvailableAt!) - Date.parse(b.estimatedAvailableAt!))[0];
+  const contributions = quotas.flatMap(quota => {
+    if (availability.find(item => item.accountId === quota.accountId)?.state === "unknown") return [];
+    const week = quota.windows.find(window => window.applicability === "required" && window.durationSeconds === 604800)?.remainingPercent;
+    const five = quota.windows.find(window => window.applicability === "required" && window.durationSeconds === 18000)?.remainingPercent;
+    return week == null ? [] : [five == null ? week : five * Math.min(week / 15, 1)];
+  });
   return {
     source,
     accounts: selected, quotas,
-    availability: selected.map(account => account.id === "demo-work"
-      ? { accountId: account.id, state: "unknown", reason: "stale", estimatedAvailableAt: null }
-      : account.id === "demo-studio"
-        ? { accountId: account.id, state: "waiting", reason: "below_threshold", estimatedAvailableAt: new Date(baseTime + resets[1] * 1000).toISOString() }
-        : { accountId: account.id, state: "now", reason: "available", estimatedAvailableAt: null }),
-    recommendation: { state: available ? "now" : waiting ? "waiting" : selected.length ? "unknown" : "empty", accountId: available?.id ?? waiting?.id ?? null, estimatedAvailableAt: available ? null : waiting ? new Date(baseTime + resets[1] * 1000).toISOString() : null, reason: available ? "available" : waiting ? "earliest_available" : "no_data", coverage: { selected: selected.length, known: selected.filter(account => account.id !== "demo-work").length, unknown: selected.filter(account => account.id === "demo-work").length, complete: !selected.some(account => account.id === "demo-work") } },
+    availability,
+    recommendation: { state: available ? "now" : waiting ? "waiting" : selected.length ? "unknown" : "empty", accountId: available?.id ?? waiting?.accountId ?? null, estimatedAvailableAt: available ? null : waiting?.estimatedAvailableAt ?? null, reason: available ? "available" : waiting ? "earliest_available" : "no_data", coverage: { selected: selected.length, known: contributions.length, unknown: selected.length - contributions.length, complete: contributions.length === selected.length } },
+    totalQuota: { percent: contributions.length ? contributions.reduce((a, b) => a + b, 0) : null, partial: contributions.length < selected.length, weeklyScalePercent: 15 },
     nextRefreshAt: settings.autoRefresh ? new Date(Date.now() + settings.refreshIntervalSeconds * 1000).toISOString() : null,
   };
 }
@@ -78,7 +124,7 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
   let response: ApiResult<unknown>;
   if (["settings.update", "themes.select", "accounts.selection.update"].includes(method) && request.expectedRevision !== settings.settingsRevision) return fail("CONFLICT", "设置已更新，请重试。") as ApiResult<MethodMap[M]["result"]>;
   switch (method) {
-    case "capabilities.get": response = result({ appVersion: "0.2.0", apiVersion: "1.0", transport: "tauri", enabledMethods: methods, grantedScopes: ["quota.read", "quota.refresh", "events.read", "settings.read", "settings.write", "themes.read", "themes.write", "window.control", "diagnostics.read"], themeSchemaVersions: [1], providerIds: ["codex"], maxRefreshAccounts: 100 }); break;
+    case "capabilities.get": response = result({ appVersion: "0.2.3", apiVersion: "1.0", transport: "tauri", enabledMethods: methods, grantedScopes: ["quota.read", "quota.refresh", "events.read", "settings.read", "settings.write", "themes.read", "themes.write", "window.control", "diagnostics.read"], themeSchemaVersions: [1], providerIds: ["codex"], maxRefreshAccounts: 100 }); break;
     case "accounts.list": response = result(accounts.map((account, index) => ({ ...account, displayName: settings.display.privacyMode ? `${settings.display.locale === "zh-CN" ? "账号" : "Account"} ${index + 1}` : account.displayName }))); break;
     case "quota.snapshot.get": response = result(demoSnapshot()); break;
     case "recommendation.get": response = result(demoSnapshot().recommendation); break;
@@ -140,7 +186,7 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
       settings.settingsRevision++; emit("snapshot.changed"); response = result(settings); break;
     }
     case "window.control": response = result({ accepted: true }); break;
-    case "diagnostics.get": response = result({ appVersion: "0.2.0", adapterVersion: "演示", source, selectedAccountCount: accounts.filter(account => account.selected).length, activeJobCount: refreshing ? 1 : 0, recentErrorCodes: [] }); break;
+    case "diagnostics.get": response = result({ appVersion: "0.2.3", adapterVersion: "演示", source, selectedAccountCount: accounts.filter(account => account.selected).length, activeJobCount: refreshing ? 1 : 0, recentErrorCodes: [] }); break;
     default: response = fail("INVALID_ARGUMENT", "此功能尚未提供。");
   }
   return response as ApiResult<MethodMap[M]["result"]>;

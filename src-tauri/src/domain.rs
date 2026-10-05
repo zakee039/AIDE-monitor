@@ -1,6 +1,7 @@
 //! Quota decisions are pure and conservative. UI formatting never affects them.
 use crate::model::{
     AccountAvailability, AccountQuota, AccountSummary, Coverage, QuotaWindow, Recommendation,
+    TotalQuota,
 };
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use std::collections::HashSet;
@@ -208,11 +209,64 @@ fn weekly_reset(quota: Option<&AccountQuota>) -> Option<DateTime<Utc>> {
         .filter(|window| {
             window.scope == "base"
                 && window.applicability == "required"
-                && window.kind == "secondary"
                 && window.duration_seconds == Some(604_800)
         })
         .filter_map(|window| window.resets_at.as_deref().and_then(timestamp))
         .min()
+}
+
+/// User-requested estimate, not an official conversion or recommendation floor.
+/// Tiny positive balances still count; stale/failed/unconfirmed balances do not.
+pub fn total_quota(
+    accounts: &[AccountSummary],
+    quotas: &[AccountQuota],
+    now: DateTime<Utc>,
+) -> TotalQuota {
+    let mut total = 0.0;
+    let mut known = 0;
+    let mut selected = 0;
+    let mut seen = HashSet::new();
+    for account in accounts.iter().filter(|account| account.selected) {
+        if !seen.insert(&account.id) {
+            continue;
+        }
+        selected += 1;
+        let Some(quota) = quotas.iter().find(|quota| quota.account_id == account.id) else {
+            continue;
+        };
+        let availability = evaluate(quota, now);
+        if !matches!(availability.state.as_str(), "now" | "waiting") {
+            continue;
+        }
+        let required: Vec<_> = quota
+            .windows
+            .iter()
+            .filter(|window| window.scope == "base" && window.applicability == "required")
+            .collect();
+        let five = required
+            .iter()
+            .find(|window| window.duration_seconds == Some(18_000));
+        let week = required
+            .iter()
+            .find(|window| window.duration_seconds == Some(604_800));
+        let contribution = match (five, week) {
+            (Some(five), Some(week)) if required.len() == 2 => five
+                .remaining_percent
+                .zip(week.remaining_percent)
+                .map(|(h, w)| h * (w / 15.0).clamp(0.0, 1.0)),
+            (None, Some(week)) if required.len() == 1 => week.remaining_percent,
+            _ => None,
+        };
+        if let Some(value) = contribution {
+            total += value;
+            known += 1;
+        }
+    }
+    TotalQuota {
+        percent: (known > 0).then_some(total),
+        partial: known < selected,
+        weekly_scale_percent: 15.0,
+    }
 }
 
 /// Availability is produced by `evaluate` at the caller's common sampling time.
@@ -374,6 +428,94 @@ mod tests {
     }
     fn result(windows: Vec<QuotaWindow>) -> AccountAvailability {
         evaluate(&quota("a", windows), time())
+    }
+
+    fn balance(id: &str, hourly: f64, weekly: f64) -> AccountQuota {
+        let mut primary = window("primary", hourly == 0.0, Some(3600));
+        primary.remaining_percent = Some(hourly);
+        let mut secondary = window("secondary", weekly == 0.0, Some(86400));
+        secondary.remaining_percent = Some(weekly);
+        quota(id, vec![primary, secondary])
+    }
+
+    #[test]
+    fn total_scales_weekly_balances_and_can_exceed_one_hundred() {
+        let accounts = [account("a", 0), account("b", 1)];
+        for (weekly, expected) in [(0.0, 52.0), (7.5, 76.5), (15.0, 101.0), (77.0, 101.0)] {
+            let total = total_quota(
+                &accounts,
+                &[balance("a", 52.0, 77.0), balance("b", 49.0, weekly)],
+                time(),
+            );
+            assert_eq!(total.percent, Some(expected));
+            assert!(!total.partial);
+            assert_eq!(total.weekly_scale_percent, 15.0);
+        }
+        // Recommendation floors do not erase small positive contributions.
+        let low = total_quota(&[account("a", 0)], &[balance("a", 1.0, 1.0)], time());
+        assert!((low.percent.unwrap() - 1.0 / 15.0).abs() < 0.00001);
+    }
+
+    #[test]
+    fn total_supports_weekly_only_in_either_provider_slot() {
+        for kind in ["primary", "secondary"] {
+            let mut week = window(kind, false, Some(86400));
+            week.duration_seconds = Some(604_800);
+            week.remaining_percent = Some(73.0);
+            let q = quota("a", vec![week]);
+            assert_eq!(evaluate(&q, time()).state, "now");
+            assert_eq!(
+                total_quota(&[account("a", 0)], &[q], time()).percent,
+                Some(73.0)
+            );
+        }
+        let weekly = quota("week", vec![window("secondary", true, Some(86400))]);
+        let q = [balance("five", 0.0, 90.0), weekly];
+        let accounts = [account("five", 0), account("week", 1)];
+        let availability: Vec<_> = q.iter().map(|q| evaluate(q, time())).collect();
+        let total = total_quota(&accounts, &q, time());
+        assert_eq!(total.percent, Some(0.0));
+        assert!(!total.partial);
+        assert_eq!(
+            recommend(&accounts, &availability, &q).estimated_available_at,
+            Some(at(3600))
+        );
+    }
+
+    #[test]
+    fn total_excludes_unselected_duplicates_and_untrusted_samples() {
+        let mut deselected = account("excluded", 1);
+        deselected.selected = false;
+        let accounts = [account("a", 0), account("a", 0), deselected];
+        let total = total_quota(
+            &accounts,
+            &[balance("a", 52.0, 77.0), balance("excluded", 100.0, 100.0)],
+            time(),
+        );
+        assert_eq!(total.percent, Some(52.0));
+        assert!(!total.partial);
+        for invalid in ["stale", "error", "cache", "reset", "missing"] {
+            let mut q = balance("b", 100.0, 100.0);
+            match invalid {
+                "stale" => q.freshness = "stale".into(),
+                "error" => q.error = Some(ApiError::new("NETWORK_ERROR", "test")),
+                "cache" => q.origin = "cockpit_cache".into(),
+                "reset" => q.windows[0].resets_at = Some(at(0)),
+                "missing" => q.base_coverage_complete = false,
+                _ => unreachable!(),
+            }
+            let total = total_quota(
+                &[account("a", 0), account("b", 1)],
+                &[balance("a", 52.0, 77.0), q.clone()],
+                time(),
+            );
+            assert_eq!(total.percent, Some(52.0), "{invalid}");
+            assert!(total.partial);
+            let unknown = total_quota(&[account("b", 0)], &[q], time());
+            assert_eq!(unknown.percent, None);
+            assert!(unknown.partial);
+        }
+        assert_eq!(total_quota(&[], &[], time()).percent, None);
     }
 
     #[test]

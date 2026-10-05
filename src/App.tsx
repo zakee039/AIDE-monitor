@@ -1,7 +1,7 @@
 import { localize, setLanguage, t } from "./i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AccountAvailability, AccountQuota, AccountSummary, Capabilities, Diagnostics, QuotaWindow, Settings, SettingsPatch, Snapshot, ThemeSummary } from "../contracts/hud-api";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, CircleAlert, EyeOff, Database, FilePlus2, Info, Layers3, LoaderCircle, Palette, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, X } from "lucide-react";
 import { call, desktop, errorMessage, hud, internal } from "./api";
 import { demoSnapshot } from "./demo";
@@ -114,28 +114,57 @@ export default function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const layoutQueue = useRef<Promise<unknown>>(Promise.resolve());
 
 
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   useEffect(() => {
     if (!desktop || settingsView) return;
-    const panel = document.querySelector<HTMLElement>(".hud-shell");
+    const panel = panelRef.current;
     if (!panel) return;
     let timer: number | undefined;
-    let previousHeight = 0;
-    const observer = new ResizeObserver(() => {
+    let previousSize = "";
+    let active = true;
+    let pending: { width: number; height: number } | undefined;
+    let resizing = false;
+    const resize = async () => {
+      if (resizing) return;
+      resizing = true;
+      try {
+        while (pending && active) {
+          const size = pending;
+          pending = undefined;
+          const scheduled = layoutQueue.current.catch(() => {}).then(() => {
+            if (active) return internal("window_layout", { ...size, collapsed });
+          });
+          layoutQueue.current = scheduled;
+          await scheduled;
+        }
+      } catch (failure) { if (active) setActionError(errorMessage(failure)); }
+      finally { resizing = false; }
+    };
+    const measure = () => {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => {
-        const height = Math.max(64, Math.min(560, Math.ceil(panel.getBoundingClientRect().height)));
-        if (height !== previousHeight) {
-          previousHeight = height;
-          void getCurrentWindow().setSize(new LogicalSize(window.innerWidth, height)).catch(() => {});
+        const bounds = panel.getBoundingClientRect();
+        // A fixed orb must not grow by one logical pixel when DPI introduces
+        // fractional measurement noise. Expanded content still rounds upward.
+        const size = collapsed ? { width: 43, height: 43 } : { width: Math.max(40, Math.min(1000, Math.ceil(bounds.width))), height: Math.max(40, Math.min(560, Math.ceil(bounds.height))) };
+        const key = `${size.width}:${size.height}`;
+        if (key !== previousSize) {
+          previousSize = key;
+          pending = size;
+          void resize();
         }
       }, 80);
-    });
+    };
+    const observer = new ResizeObserver(measure);
     observer.observe(panel);
-    return () => { observer.disconnect(); window.clearTimeout(timer); };
-  }, [settingsView]);
+    measure();
+    return () => { active = false; observer.disconnect(); window.clearTimeout(timer); };
+  }, [settingsView, collapsed]);
 
   const perform = async (key: string, action: () => Promise<unknown>, success?: string) => {
     if (busy) return;
@@ -152,11 +181,11 @@ export default function App() {
   return localize(<main className={`app-stage ${desktop ? "desktop" : "browser"} ${settingsView ? "settings-stage" : "hud-stage"}`}>
     {settingsView ?
       <SettingsView state={state} loading={loading} error={actionError ?? readError} notice={notice} busy={busy} perform={perform} reload={reload} onBack={() => { setSettingsView(false); history.replaceState(null, "", location.pathname); }} /> :
-      <div className="hud-shell" style={themeStyle(state.theme)} data-tauri-drag-region>
-        {loading && !state.snapshot ? <div className="hud-empty" data-tauri-drag-region>正在读取配额…</div> : state.snapshot ?
-          <HudContent snapshot={state.snapshot} theme={state.theme} now={now} onSettings={openSettings} onRefresh={() => { void perform("refresh-all", () => call("refresh.request", {})); }} onHide={() => { void perform("hide", () => call("window.control", { action: "hide" })); }} busy={busy} /> :
+      <div ref={panelRef} className={`hud-shell ${collapsed ? "is-collapsed" : ""}`} style={themeStyle(state.theme)}>
+        {collapsed && state.snapshot ? <QuotaOrb snapshot={state.snapshot} now={now} onExpand={() => setCollapsed(false)} /> : loading && !state.snapshot ? <div className="hud-empty" data-tauri-drag-region>正在读取配额…</div> : state.snapshot ?
+          <HudContent snapshot={state.snapshot} theme={state.theme} now={now} onSettings={openSettings} onRefresh={() => { void perform("refresh-all", () => call("refresh.request", {})); }} onHide={() => { void perform("hide", () => call("window.control", { action: "hide" })); }} onCollapse={() => setCollapsed(true)} busy={busy} /> :
           <div className="hud-empty"><button className="text-button" onClick={() => { void reload(); }}>读取失败 · 点击重试</button></div>}
-        {(actionError ?? readError) && <div className="hud-error" role="alert">{actionError ?? readError}</div>}
+        {!collapsed && (actionError ?? readError) && <div className="hud-error" role="alert">{actionError ?? readError}</div>}
       </div>}
     {!desktop && !settingsView && <div className="browser-caption"><span>虚构数据预览 · 更多操作位于托盘右键菜单</span><button className="text-button" onClick={openSettings}>预览设置</button></div>}
   </main>);
@@ -164,25 +193,44 @@ export default function App() {
 
 function DemoBanner() { return localize(<div className="demo-banner"><span className="demo-label">DEMO</span><span>浏览器预览 · 全部账号与配额均为虚构</span></div>); }
 
-function HudContent({ snapshot, theme, now, onSettings, onRefresh, onHide, busy }: { snapshot: Snapshot; theme: ThemeDocument; now: number; onSettings?: () => void; onRefresh?: () => void; onHide?: () => void; busy?: string | null }) {
+// Absent limits are omitted only when the adapter identifies them as inapplicable.
+// Unknown/malformed limits retain a placeholder instead of suggesting extra quota.
+function displayWindows(quota?: AccountQuota): (QuotaWindow | undefined)[] {
+  if (!quota) return [undefined];
+  const windows = quota.windows.filter(window => window.scope === "base" && window.applicability !== "not_applicable");
+  return windows.length ? windows.sort((a, b) => (a.durationSeconds ?? 0) - (b.durationSeconds ?? 0)) : [undefined];
+}
+
+function windowColumnKey(window?: QuotaWindow): string {
+  return window?.durationSeconds != null ? `duration-${window.durationSeconds}` : `unknown-${window?.kind ?? "quota"}`;
+}
+
+function HudContent({ snapshot, theme, now, onSettings, onRefresh, onHide, onCollapse, busy }: { snapshot: Snapshot; theme: ThemeDocument; now: number; onSettings?: () => void; onRefresh?: () => void; onHide?: () => void; onCollapse?: () => void; busy?: string | null }) {
   const hasCredits = snapshot.quotas.some(quota => quota.resetCreditsAvailable != null);
+  const windowColumns = [...new Set(snapshot.accounts.flatMap(account => displayWindows(snapshot.quotas.find(quota => quota.accountId === account.id)).map(windowColumnKey)))].sort((a, b) => {
+    const duration = (key: string) => key.startsWith("duration-") ? Number(key.slice(9)) : Infinity;
+    return duration(a) - duration(b) || a.localeCompare(b);
+  });
+  // Each limit shares percentage, separator and countdown tracks across rows.
+  // Four character tracks separate logical columns without fixed data widths.
+  const columns = `max-content minmax(0, max-content)${windowColumns.length ? ` repeat(${windowColumns.length}, 4ch max-content max-content max-content)` : ""}${hasCredits ? " 4ch max-content" : ""}`;
   return localize(<div className="hud-body" data-tauri-drag-region>
     {snapshot.accounts.length ? <>
-      <section className={`compact-accounts ${hasCredits ? "has-credits" : ""}`} aria-label="账号配额" data-tauri-drag-region>{snapshot.accounts.map(account => <AccountRow key={account.id} account={account} quota={snapshot.quotas.find(quota => quota.accountId === account.id)} availability={snapshot.availability.find(item => item.accountId === account.id)} now={now} showCredits={hasCredits} interactive={!!onSettings} />)}</section>
+      <section className="compact-accounts" style={{ gridTemplateColumns: columns }} aria-label="账号配额" data-tauri-drag-region>{snapshot.accounts.map(account => <AccountRow key={account.id} account={account} quota={snapshot.quotas.find(quota => quota.accountId === account.id)} availability={snapshot.availability.find(item => item.accountId === account.id)} now={now} showCredits={hasCredits} windowColumns={windowColumns} interactive={!!onSettings} />)}</section>
     </> : <div className="hud-empty" data-tauri-drag-region><span>{snapshot.source.state === "ready" ? "尚未选择账号" : "尚未连接账号来源"}</span><span className="hud-empty-hint">右键托盘 → 设置</span></div>}
-    <RecommendationStrip snapshot={snapshot} now={now} onSettings={onSettings} onRefresh={onRefresh} onHide={onHide} busy={busy} />
+    <RecommendationStrip snapshot={snapshot} now={now} onSettings={onSettings} onRefresh={onRefresh} onHide={onHide} onCollapse={onCollapse} busy={busy} />
     <span className="sr-only">{theme.name}</span>
   </div>);
 }
 
-function AccountRow({ account, quota, availability, now, showCredits, interactive }: { account: AccountSummary; quota?: AccountQuota; availability?: AccountAvailability; now: number; showCredits: boolean; interactive: boolean }) {
+function AccountRow({ account, quota, availability, now, showCredits, windowColumns, interactive }: { account: AccountSummary; quota?: AccountQuota; availability?: AccountAvailability; now: number; showCredits: boolean; windowColumns: string[]; interactive: boolean }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { setError(null); }, [quota?.lastSuccessAt]);
   const refreshing = pending || quota?.status === "refreshing";
   const status = error ?? statusText(quota, availability);
   const state = error || quota?.error ? "error" : quota?.freshness === "stale" ? "stale" : availability?.state ?? "unknown";
-  const windows = [18000, 604800].map(duration => quota?.windows.find(window => window.scope === "base" && window.durationSeconds === duration));
+  const windows = displayWindows(quota);
   const refresh = async () => {
     setPending(true); setError(null);
     try { await call("refresh.request", { accountIds: [account.id] }); }
@@ -192,8 +240,8 @@ function AccountRow({ account, quota, availability, now, showCredits, interactiv
   return localize(<div className={`compact-row state-${state}`} data-tauri-drag-region>
     <button className={`row-refresh ${refreshing ? "refreshing" : ""}`} aria-label={`刷新 ${account.displayName}`} disabled={!interactive || refreshing} onClick={() => { void refresh(); }}><RefreshCw size={13} className={refreshing ? "spin" : ""} /></button>
     <span className="compact-name" translate="no" data-tauri-drag-region>{account.displayName}</span>
-    {windows.map((window, index) => <span className={`compact-quota ${quotaBand(window)}`} key={index} aria-label={`${index === 0 ? "5h" : "7d"} 剩余 ${window ? remainingText(window) : "未知"}，${window ? durationText(window.resetsAt, now) : "待查询"}`} data-tauri-drag-region><strong>{window ? remainingText(window) : "—"}</strong><span className="quota-dot">·</span><span>{window ? durationText(window.resetsAt, now) : "—"}</span></span>)}
-    {showCredits && <span className="reset-credits" aria-label={quota?.resetCreditsAvailable != null ? `可用重置次数 ${quota.resetCreditsAvailable}` : "重置次数未知"} data-tauri-drag-region>{quota?.resetCreditsAvailable != null ? `R: ${quota.resetCreditsAvailable}` : ""}</span>}
+    {windows.map((window, index) => <span className={`compact-quota ${quotaBand(window)}`} style={{ gridColumn: `${4 + windowColumns.indexOf(windowColumnKey(window)) * 4} / span 3` }} key={window?.id ?? index} aria-label={`${window?.label ?? "?"} 剩余 ${window ? remainingText(window) : "未知"}，${window ? durationText(window.resetsAt, now) : "待查询"}`} data-tauri-drag-region><strong>{window ? remainingText(window) : "—"}</strong><span className="quota-dot">·</span><span>{window ? durationText(window.resetsAt, now) : "—"}</span></span>)}
+    {showCredits && <span className="reset-credits" style={{ gridColumn: windowColumns.length * 4 + 4 }} aria-label={quota?.resetCreditsAvailable != null ? `可用重置次数 ${quota.resetCreditsAvailable}` : "重置次数未知"} data-tauri-drag-region>{quota?.resetCreditsAvailable != null ? `R: ${quota.resetCreditsAvailable}` : ""}</span>}
     {state === "error" && <span className="row-state state-error" role="img" aria-label={status}>!</span>}
   </div>);
 }
@@ -204,18 +252,44 @@ function quotaBand(window?: QuotaWindow): string {
   return percent < 20 ? "quota-red" : percent < 50 ? "quota-orange" : percent < 80 ? "quota-blue" : "quota-green";
 }
 
-function RecommendationStrip({ snapshot, now, onSettings, onRefresh, onHide, busy }: { snapshot: Snapshot; now: number; onSettings?: () => void; onRefresh?: () => void; onHide?: () => void; busy?: string | null }) {
+function RecommendationStrip({ snapshot, now, onSettings, onRefresh, onHide, onCollapse, busy }: { snapshot: Snapshot; now: number; onSettings?: () => void; onRefresh?: () => void; onHide?: () => void; onCollapse?: () => void; busy?: string | null }) {
   const recommendation = snapshot.recommendation;
   const account = snapshot.accounts.find(item => item.id === recommendation.accountId);
   const refreshing = busy === "refresh-all" || snapshot.quotas.some(quota => quota.status === "refreshing");
   return localize(<div className={`compact-recommendation state-${recommendation.state}`} data-tauri-drag-region>
-    <span>avaliable:</span><strong translate="no" data-tauri-drag-region>{account?.displayName ?? "—"}</strong><span>·</span><span className="usable-time">{recommendation.state === "now" ? "now" : recommendation.state === "waiting" ? durationText(recommendation.estimatedAvailableAt, now) : "—"}</span>
+    <span className="availability-copy" data-tauri-drag-region><span>avaliable:</span><strong translate="no" data-tauri-drag-region>{account?.displayName ?? "—"}</strong><span>·</span><span className="usable-time">{recommendation.state === "now" ? "now" : recommendation.state === "waiting" ? durationText(recommendation.estimatedAvailableAt, now) : "—"}</span></span>
     <div className="hud-actions">
       <button className="row-refresh" aria-label="设置" disabled={!onSettings || !!busy} onClick={onSettings}><Settings2 size={13} /></button>
       <button className="row-refresh" aria-label="刷新全部" disabled={!onRefresh || !!busy || refreshing || !snapshot.accounts.length} onClick={onRefresh}><RefreshCw size={13} className={refreshing ? "spin" : ""} /></button>
       <button className="row-refresh" aria-label="隐藏悬浮窗" disabled={!onHide || !!busy} onClick={onHide}><EyeOff size={13} /></button>
+      {onCollapse && <button className="row-refresh hud-collapse" aria-label="折叠悬浮窗" onClick={onCollapse}><ChevronRight size={14} /></button>}
     </div>
   </div>);
+}
+
+function QuotaOrb({ snapshot, now, onExpand }: { snapshot: Snapshot; now: number; onExpand: () => void }) {
+  const total = snapshot.totalQuota;
+  const percent = total?.percent;
+  const known = percent != null && Number.isFinite(percent);
+  const waiting = known && percent === 0 && !total?.partial && snapshot.recommendation.state === "waiting";
+  const resetAt = snapshot.recommendation.estimatedAvailableAt;
+  const minutes = resetAt ? Math.ceil((Date.parse(resetAt) - now) / 60000) : NaN;
+  const timeLines = waiting && Number.isFinite(minutes) && minutes > 0
+    ? minutes >= 1440 ? [`${Math.floor(minutes / 1440)}D`, `${Math.floor(minutes % 1440 / 60)}H`] : [`${Math.floor(minutes / 60)}H`, `${minutes % 60}M`]
+    : null;
+  const text = waiting ? timeLines?.join(" ") ?? "—" : known && (percent > 0 || !total?.partial) ? `${percent > 0 && percent < 1 ? "<1" : Math.floor(percent)}%` : "—";
+  const drag = useRef({ x: 0, y: 0, moved: false, pressed: false });
+  return <button className={`quota-orb ${waiting ? "orb-waiting" : ""} ${!timeLines && text.length > 4 ? "orb-long" : ""} ${!timeLines && text.length > 5 ? "orb-extra-long" : ""}`} aria-label={`${t("展开悬浮窗")} · ${t(waiting ? "等待重置" : "估算总额度")} ${text}${total?.partial ? ` · ${t("部分账号数据不可用")}` : ""}`} onPointerDown={event => {
+    if (event.button === 0) drag.current = { x: event.clientX, y: event.clientY, moved: false, pressed: true };
+  }} onPointerMove={event => {
+    const origin = drag.current;
+    if (!desktop || !origin.pressed || origin.moved || !(event.buttons & 1) || Math.hypot(event.clientX - origin.x, event.clientY - origin.y) < 4) return;
+    origin.moved = true;
+    void getCurrentWindow().startDragging().catch(() => {});
+  }} onPointerUp={() => { drag.current.pressed = false; }} onPointerCancel={() => { drag.current.pressed = false; }} onClick={event => {
+    if (event.detail === 0 || !drag.current.moved) onExpand();
+    drag.current.moved = false;
+  }}><span className={timeLines ? "orb-countdown" : undefined}>{timeLines ? timeLines.map(line => <span key={line}>{line}</span>) : text}</span></button>;
 }
 
 type Performer = (key: string, action: () => Promise<unknown>, success?: string) => Promise<void>;
@@ -246,7 +320,7 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
   return localize(<div className="settings-shell" style={themeStyle(defaultTheme)}>
     <header className="settings-header" data-tauri-drag-region><div className="brand" data-tauri-drag-region><div className="brand-icon"><Layers3 size={19} /></div><span className="brand-name" data-tauri-drag-region>Chatgpt HUD <span className="brand-subtle">/ 设置</span></span></div><div className="header-actions">{!desktop && <button className="text-button return-button" onClick={onBack}><ArrowLeft size={14} />返回 HUD</button>}</div></header>
     {!desktop && <DemoBanner />}
-    <div className="settings-layout"><aside className="settings-sidebar"><div className="sidebar-kicker">WORKSPACE</div><nav aria-label="设置分区">{nav.map(item => <button key={item.id} className={`nav-button ${section === item.id ? "selected" : ""}`} onClick={() => setSection(item.id)}>{item.icon}<span>{item.label}</span><ChevronRight size={13} /></button>)}</nav><div className="sidebar-footer"><ShieldCheck size={15} /><span>凭据只留在本机</span><small>v0.2.0</small></div></aside>
+    <div className="settings-layout"><aside className="settings-sidebar"><div className="sidebar-kicker">WORKSPACE</div><nav aria-label="设置分区">{nav.map(item => <button key={item.id} className={`nav-button ${section === item.id ? "selected" : ""}`} onClick={() => setSection(item.id)}>{item.icon}<span>{item.label}</span><ChevronRight size={13} /></button>)}</nav><div className="sidebar-footer"><ShieldCheck size={15} /><span>凭据只留在本机</span><small>v{state.capabilities?.appVersion ?? "—"}</small></div></aside>
     <section className="settings-content">
       {exportNotice && <div className="settings-alert success" role="status">{exportNotice}</div>}
       {(error || notice) && <div className={error ? "settings-alert error" : "settings-alert success"} role={error ? "alert" : "status"}>{error ? <CircleAlert size={16} /> : <Check size={16} />}<span>{error ?? notice}</span></div>}
@@ -268,7 +342,7 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
         {preview && <div className="theme-preview-section"><div className="preview-heading"><span><span className="demo-label">PREVIEW</span>{preview.name} · 虚构数据</span><button className="icon-button" aria-label="关闭主题预览" onClick={() => { setPreview(null); setImported(null); }}><X size={15} /></button></div><div className="embedded-hud" style={themeStyle(preview)}><HudContent snapshot={demoSnapshot()} theme={preview} now={Date.now()} /></div><div className="form-actions"><span>主题只改变外观，不改变配额判断</span><button className="primary-button" disabled={busy !== null} onClick={() => selectTheme(imported?.id ?? preview.id)}>应用此主题 <Check size={14} /></button></div></div>}
         <p className="helper-note"><ShieldCheck size={14} />主题仅接受本地 JSON，导入前会校验格式与可读性。<button className="text-button" disabled={busy !== null} onClick={() => { if (desktop) void perform("export-theme", async () => { const result = await internal("theme_export", {}); if (!result.cancelled) setExportNotice(t("主题示例已保存。")); }); else { const link = document.createElement("a"); link.href = "/theme-template.json"; link.download = "theme.json"; link.click(); } }}>下载示例</button></p>
       </>}
-      {section === "about" && <><SectionHeading eyebrow="SMALL FOOTPRINT" title="专注配额，轻量常驻。" description="Tauri 2 + Rust · 开放接口 · 可自行扩展主题" /><SettingsCard title="Chatgpt HUD" description="0.2.0" icon={<Layers3 size={18} />}><p className="about-description">读取官方客户端或 Cockpit Tools 登录账号，展示配额与重置时间。认证失效请在原客户端重新登录。</p><div className="about-status"><span className="status-dot" />{desktop ? "正在桌面应用中运行" : "浏览器演示，全部数据均为虚构"}</div></SettingsCard><SettingsCard title="开放能力" description="以当前应用实际提供的方法为准" icon={<SlidersHorizontal size={17} />} action={<button className="text-button" onClick={() => { if (desktop) void perform("docs", () => internal("docs_open", {})); else window.open("/api.html", "_blank", "noopener,noreferrer"); }}>接口说明 <ChevronRight size={14} /></button>}><div className="capability-summary"><div><strong>{state.capabilities?.enabledMethods.length ?? 0}</strong><span>可用方法</span></div><div><strong>{state.capabilities?.apiVersion ?? "—"}</strong><span>接口版本</span></div><div><strong>{state.capabilities?.themeSchemaVersions.join(", ") ?? "—"}</strong><span>主题版本</span></div></div><div className="card-bottom"><span>第一版通过应用内部接口调用。</span><button className="text-button" disabled={busy !== null || !state.capabilities?.enabledMethods.includes("diagnostics.get")} onClick={() => { void perform("diagnostics", async () => { const response = await call("diagnostics.get", {}); setDiagnostics(response.data); }); }}>检查状态 <ChevronRight size={14} /></button></div>{diagnostics && <div className="diagnostics-summary"><div><span>适配器版本</span><span>{diagnostics.adapterVersion}</span></div><div><span>所选账号 / 进行中的刷新</span><span>{diagnostics.selectedAccountCount} / {diagnostics.activeJobCount}</span></div><div><span>最近错误</span><span>{diagnostics.recentErrorCodes.length ? diagnostics.recentErrorCodes.join("、") : "暂无"}</span></div></div>}</SettingsCard><button className="text-button" disabled={busy !== null} onClick={() => { void perform("position", () => call("window.control", { action: "restore_position" }), "窗口位置已恢复。"); }}>恢复悬浮窗位置</button></>}
+      {section === "about" && <><SectionHeading eyebrow="SMALL FOOTPRINT" title="专注配额，轻量常驻。" description="Tauri 2 + Rust · 开放接口 · 可自行扩展主题" /><SettingsCard title="Chatgpt HUD" description={state.capabilities?.appVersion ?? "—"} icon={<Layers3 size={18} />}><p className="about-description">读取官方客户端或 Cockpit Tools 登录账号，展示配额与重置时间。认证失效请在原客户端重新登录。</p><div className="about-status"><span className="status-dot" />{desktop ? "正在桌面应用中运行" : "浏览器演示，全部数据均为虚构"}</div></SettingsCard><SettingsCard title="开放能力" description="以当前应用实际提供的方法为准" icon={<SlidersHorizontal size={17} />} action={<button className="text-button" onClick={() => { if (desktop) void perform("docs", () => internal("docs_open", {})); else window.open("/api.html", "_blank", "noopener,noreferrer"); }}>接口说明 <ChevronRight size={14} /></button>}><div className="capability-summary"><div><strong>{state.capabilities?.enabledMethods.length ?? 0}</strong><span>可用方法</span></div><div><strong>{state.capabilities?.apiVersion ?? "—"}</strong><span>接口版本</span></div><div><strong>{state.capabilities?.themeSchemaVersions.join(", ") ?? "—"}</strong><span>主题版本</span></div></div><div className="card-bottom"><span>第一版通过应用内部接口调用。</span><button className="text-button" disabled={busy !== null || !state.capabilities?.enabledMethods.includes("diagnostics.get")} onClick={() => { void perform("diagnostics", async () => { const response = await call("diagnostics.get", {}); setDiagnostics(response.data); }); }}>检查状态 <ChevronRight size={14} /></button></div>{diagnostics && <div className="diagnostics-summary"><div><span>适配器版本</span><span>{diagnostics.adapterVersion}</span></div><div><span>所选账号 / 进行中的刷新</span><span>{diagnostics.selectedAccountCount} / {diagnostics.activeJobCount}</span></div><div><span>最近错误</span><span>{diagnostics.recentErrorCodes.length ? diagnostics.recentErrorCodes.join("、") : "暂无"}</span></div></div>}</SettingsCard><button className="text-button" disabled={busy !== null} onClick={() => { void perform("position", () => call("window.control", { action: "restore_position" }), "窗口位置已恢复。"); }}>恢复悬浮窗位置</button></>}
       </>}
       <div className="settings-content-footer"><ShieldCheck size={12} /><span>读取凭据与配额均由本机后台处理</span><button className="text-button" onClick={() => { void reload(); }} disabled={busy !== null}>同步状态</button></div>
     </section></div>

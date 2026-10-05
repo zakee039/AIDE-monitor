@@ -2,13 +2,19 @@
 
 A compact Windows quota HUD built with **Tauri 2 + Rust + React / TypeScript**. Cream background, mint accent (`#39C5BB`), tray controls and custom JSON themes. No Electron.
 
-**Version 0.2.0** · [中文说明](#中文说明) · [API reference](public/api.html) · [TypeScript contract](contracts/hud-api.ts)
+**Version 0.2.3** · [中文说明](#中文说明) · [API reference](public/api.html) · [TypeScript contract](contracts/hud-api.ts)
 
 ## Download
 
-[Windows releases](https://github.com/zakee039/chatgpt-HUD/releases/tag/v0.2.0). Build from source if release binaries are unavailable. Windows x64 with WebView2 is required.
+[Windows releases](https://github.com/zakee039/chatgpt-HUD/releases/tag/v0.2.3). Windows x64 with WebView2 is required.
 
 ## What's new
+
+- Fold the HUD with the footer's `>` button into a draggable 43 × 43 quota orb with larger 16px text. Click it to expand. It shows the estimated sum across selected accounts, including totals above 100%; when all known quota is exhausted, it shows the footer's earliest usable countdown on two centered lines, such as `3H` / `16M` (or days / hours for longer waits).
+- Content-sized account and quota columns, aligned across rows with 4-character spacing between columns. Percentages, separators and countdowns share their own aligned tracks. Weekly-only accounts omit the 5-hour limit; footer text shares one font and baseline. All three built-in themes use the same behavior.
+- `quota.snapshot.get` includes `totalQuota: {percent, partial, weeklyScalePercent}`. Dual-limit accounts contribute `5hRemaining × min(weeklyRemaining / 15, 1)`; weekly-only accounts contribute their weekly remaining percentage directly. **15% is a local estimate requested for this HUD, not an official OpenAI conversion.** [Official Codex pricing](https://learn.chatgpt.com/docs/pricing) describes plan-dependent limits without prescribing this ratio. Failed, stale or unconfirmed accounts are omitted, with partial coverage retained in accessibility labels and `—` indicating an unknown total. Recommendation floors remain separate.
+
+Version 0.2.0 also introduced:
 
 - English by default, with an instantly saved English / 简体中文 selector at the top of General settings. Tray labels follow the selected language.
 - Read-only official Codex client / CLI ChatGPT sign-ins from `CODEX_HOME/auth.json` (default `~/.codex/auth.json`), with Cockpit Tools compatibility. API-key accounts are excluded.
@@ -24,17 +30,17 @@ A compact Windows quota HUD built with **Tauri 2 + Rust + React / TypeScript**. 
 2. Start Chatgpt HUD. Right-click the tray icon → Settings. Automatic source discovery prefers the official auth file; an existing explicitly selected source is preserved.
 3. If needed, choose the directory containing `auth.json` or Cockpit's `codex_accounts.json`.
 4. Select accounts and save the selection. Edit display names directly; they save automatically.
-5. Use the HUD footer or tray menu to open settings, refresh all accounts or hide the HUD. Only the settings window appears on the taskbar.
+5. Use the HUD footer or tray menu to open settings, refresh all accounts or hide the HUD. Fold with `>`; click the orb to expand, or drag it to reposition. Only the settings window appears on the taskbar.
 
 The source is one selected directory at a time. Official OS-keyring and memory-only credentials are not yet supported. The “Local sign-in” label identifies the saved official file at the last scan; it does not identify every open conversation's active account. Rescan after switching accounts. Expired sign-ins must be renewed in the original client; HUD never exchanges refresh tokens or modifies source files.
 
-The HUD shows 5-hour and weekly remaining quota, reset countdowns and provider-reported reset credits (`R`). Colors: below 20% red, 20–49% orange, 50–79% blue, 80–100% green. A current recommendation requires **5h ≥ 5% and weekly ≥ 2%**. Unknown, stale or failed samples are never treated as available. Countdown expiration requires verification.
+The HUD shows applicable 5-hour and weekly remaining quota, reset countdowns and provider-reported reset credits (`R`). Colors: below 20% red, 20–49% orange, 50–79% blue, 80–100% green. A current recommendation requires **5h ≥ 5% and weekly ≥ 2%** for applicable limits; a weekly-only account requires weekly ≥ 2%. Unknown, stale or failed samples are never treated as available. Countdown expiration requires verification.
 
 ## Themes and API
 
 Three included themes: Cream Mint, Midnight and Daylight. Import a validated local JSON theme under Appearance; download the example there or use [theme-template.json](public/theme-template.json). Themes change appearance only.
 
-Open About → API reference for parameters, results and examples. The API currently uses **in-app Tauri IPC**, not an external HTTP service. Untrusted webpages cannot invoke it. Credentials are never returned to the frontend. Architecture documents include future HTTP/SSE proposals; those are not implemented in 0.2.0.
+Open About → API reference for parameters, results and examples. The API currently uses **in-app Tauri IPC**, not an external HTTP service. Untrusted webpages cannot invoke it. Credentials are never returned to the frontend. Architecture documents include future HTTP/SSE proposals; those are not implemented in 0.2.3.
 
 ## Develop
 
@@ -67,7 +73,11 @@ This is an independent implementation, not a fork or runtime dependency of Cockp
 
 ## 中文说明
 
-**Chatgpt HUD 0.2.0** 是基于 Tauri 的轻量配额悬浮窗，奶油背景、薄荷主题色，主要操作位于托盘右键菜单。
+**Chatgpt HUD 0.2.3** 是基于 Tauri 的轻量配额悬浮窗，奶油背景、薄荷主题色，主要操作位于托盘右键菜单。
+
+- 底栏 `>` 将 HUD 折叠为 43 × 43 圆球，点击圆球展开，按住拖动调整位置；总额度可超过 100%，全部可信额度耗尽时显示最近可用倒计时。
+- 双限额账号按 `Σ[5H剩余% × min(周剩余% / 15, 1)]` 汇总；只有周限额的账号直接贡献周剩余百分比。15% 是本项目估算规则，官方未公布固定换算比例。过期、失败或等待核实的样本不计入，部分状态保留在无障碍说明中，数值不带约等号，未知使用 `—`。
+- 账号与额度列由内容决定宽度，周限额单独存在时隐藏 5H；`now` 与底栏名称使用相同字体和基线，三个自带主题均生效。
 
 - 常规顶部支持中英切换，默认英语；设置、托盘同步切换。
 - 默认发现 Codex 官方客户端/CLI 的 ChatGPT 登录文件：`CODEX_HOME/auth.json`，一般为 `~/.codex/auth.json`；保留 Cockpit Tools 只读兼容，排除 API 模式。

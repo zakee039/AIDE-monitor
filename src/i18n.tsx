@@ -3,6 +3,7 @@ import { cloneElement, isValidElement, type ReactNode } from "react";
 let language = "en";
 export function setLanguage(locale: string) { language = locale; }
 const en: Record<string, string> = {
+  "折叠悬浮窗": "Collapse HUD", "展开悬浮窗": "Expand HUD", "估算总额度": "Estimated total quota", "部分账号数据不可用": "Some account data is unavailable",
   "设置分区": "Settings sections", "浏览器演示 · 虚构账号": "Browser demo · Sample accounts",
   "常规": "General", "账号": "Accounts", "外观": "Appearance", "关于": "About", "/ 设置": "/ Settings", "设置": "Settings",
   "语言": "Language", "界面语言": "Interface language", "更改后立即保存": "Changes save automatically",

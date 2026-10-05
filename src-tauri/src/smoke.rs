@@ -274,6 +274,7 @@ const SCRIPT: &str = r#"
     const snapshot = await call('hud_v1_quota_snapshot_get');
     assert(snapshot.accounts.length === 0 && snapshot.quotas.length === 0, 'ISOLATED_SNAPSHOT_NOT_EMPTY');
     assert(snapshot.source.state === 'ready', 'ISOLATED_SOURCE_NOT_READY');
+    assert(snapshot.totalQuota.percent === null && snapshot.totalQuota.partial === false && snapshot.totalQuota.weeklyScalePercent === 15, 'TOTAL_QUOTA_CONTRACT_MISMATCH');
     const themes = await call('hud_v1_themes_list');
     assert(Array.isArray(themes) && themes.some(theme => theme.id === 'paper'), 'BUILT_IN_THEMES_MISSING');
     const theme = await call('hud_internal_theme_get');
@@ -306,6 +307,30 @@ const SCRIPT: &str = r#"
       } catch { denied = true; }
       assert(denied, 'HUD_WRITE_NOT_REJECTED');
       checks.push('hud-write-ACL-rejection');
+      currentCheck = 'native-collapse-expand';
+      while (!document.querySelector('.hud-collapse') && Date.now() < until) await pause(50);
+      const collapse = document.querySelector('.hud-collapse');
+      assert(collapse, 'COLLAPSE_CONTROL_MISSING');
+      collapse.click();
+      const foldedDeadline = Date.now() + 3000;
+      // Physical window sizes round to whole pixels at fractional system DPI.
+      const orbViewportMatches = () => Math.abs(innerWidth - 43) <= 1 && Math.abs(innerHeight - 43) <= 1;
+      while ((!document.querySelector('.quota-orb') || !orbViewportMatches()) && Date.now() < foldedDeadline) await pause(50);
+      const orb = document.querySelector('.quota-orb');
+      assert(orb && orbViewportMatches(), 'NATIVE_ORB_SIZE_MISMATCH');
+      const foldedBounds = document.querySelector('.hud-shell').getBoundingClientRect();
+      assert(Math.abs(foldedBounds.width - 43) < .1 && Math.abs(foldedBounds.height - 43) < .1, 'ORB_CONTENT_SIZE_MISMATCH');
+      window.__HUD_SMOKE_ORB_VIEWPORT = {width:innerWidth, height:innerHeight, contentWidth:foldedBounds.width, contentHeight:foldedBounds.height, scale:devicePixelRatio};
+      assert(orb.textContent === '—', 'UNKNOWN_ORB_SHOWN_AS_ZERO');
+      assert(getComputedStyle(orb).fontSize === '16px', 'ORB_FONT_SIZE_MISMATCH');
+      assert(getComputedStyle(document.documentElement).backgroundColor === 'rgba(0, 0, 0, 0)', 'ORB_BACKGROUND_NOT_TRANSPARENT');
+      orb.click();
+      const expandedDeadline = Date.now() + 3000;
+      const expandedViewportMatches = () => !document.querySelector('.quota-orb') && innerWidth > 44 && Math.abs(document.querySelector('.hud-shell').getBoundingClientRect().width - innerWidth) < 2;
+      while (!expandedViewportMatches() && Date.now() < expandedDeadline) await pause(50);
+      assert(expandedViewportMatches() && document.querySelector('.hud-collapse'), 'NATIVE_EXPAND_FAILED');
+      assert(Math.abs(document.querySelector('.hud-shell').getBoundingClientRect().width - innerWidth) < 2, 'NATIVE_CONTENT_SIZE_MISMATCH');
+      checks.push('native-collapse-expand');
       await call('hud_v1_window_control', {action:'open_settings'});
       checks.push('runtime-settings-open');
     }
@@ -316,10 +341,10 @@ const SCRIPT: &str = r#"
     assert(!resources.some(entry => ['script','link','css'].includes(entry.initiatorType) && entry.responseStatus >= 400), 'ASSET_HTTP_FAILURE');
     checks.push('asset-and-CSP-check');
     window.__HUD_SMOKE_RESULT = {ok:true, label, checks, methodCount:capabilities.enabledMethods.length,
-      scopeCount:capabilities.grantedScopes.length, nativeMain:true, demoVisible:false, cspViolations:violations.length, viewport:{width:innerWidth,height:innerHeight}};
+      scopeCount:capabilities.grantedScopes.length, nativeMain:true, demoVisible:false, cspViolations:violations.length, orbViewport:window.__HUD_SMOKE_ORB_VIEWPORT, viewport:{width:innerWidth,height:innerHeight}};
   })().catch(error => {
     window.__HUD_SMOKE_RESULT = {ok:false, label, checks, failedCheck:currentCheck,
-      error:/^[A-Z_]+$/.test(error.message || '') ? error.message : 'JAVASCRIPT_CHECK_FAILED'};
+      error:/^[A-Z_]+$/.test(error.message || '') ? error.message : 'JAVASCRIPT_CHECK_FAILED', orbViewport:window.__HUD_SMOKE_ORB_VIEWPORT, viewport:{width:innerWidth,height:innerHeight,scale:devicePixelRatio}, panel:document.querySelector('.hud-shell')?.getBoundingClientRect().toJSON()};
   });
 })();
 "#;

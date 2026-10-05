@@ -630,6 +630,84 @@ fn window_action(app: &tauri::AppHandle, action: &str) -> Result<Value, ApiError
 struct WindowRequest {
     action: String,
 }
+
+#[derive(Default)]
+struct HudLayoutState(std::sync::Mutex<HudLayout>);
+
+const HUD_ORB_SIZE: f64 = 43.0;
+
+#[derive(Default)]
+struct HudLayout {
+    collapsed: bool,
+    expanded_width: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HudLayoutRequest {
+    collapsed: bool,
+    width: f64,
+    height: f64,
+}
+
+// Internal trusted-HUD sizing: content determines the expanded size, while the
+// orb has a genuinely small native window with transparent corners.
+#[tauri::command]
+async fn hud_internal_window_layout(
+    window: WebviewWindow,
+    service: State<'_, Service>,
+    layout: State<'_, HudLayoutState>,
+    request: Value,
+) -> Result<ApiResult<Value>, String> {
+    let result = (|| {
+        if window.label() != "hud" {
+            return Err(ApiError::new("FORBIDDEN", "此窗口没有该操作权限"));
+        }
+        let request: HudLayoutRequest = parse(request)?;
+        if !request.width.is_finite()
+            || !request.height.is_finite()
+            || !(40.0..=1000.0).contains(&request.width)
+            || !(40.0..=560.0).contains(&request.height)
+            || (request.collapsed
+                && (request.width != HUD_ORB_SIZE || request.height != HUD_ORB_SIZE))
+        {
+            return Err(ApiError::new("INVALID_ARGUMENT", "窗口尺寸无效"));
+        }
+        let mut layout = layout
+            .0
+            .lock()
+            .map_err(|_| ApiError::new("INTERNAL_ERROR", "无法调整悬浮窗"))?;
+        let before = window
+            .inner_size()
+            .map_err(|_| ApiError::new("INTERNAL_ERROR", "无法读取窗口尺寸"))?;
+        let position = window
+            .outer_position()
+            .map_err(|_| ApiError::new("INTERNAL_ERROR", "无法读取窗口位置"))?;
+        let scale = window
+            .scale_factor()
+            .map_err(|_| ApiError::new("INTERNAL_ERROR", "无法读取显示缩放"))?;
+        window
+            .set_size(tauri::LogicalSize::new(request.width, request.height))
+            .and_then(|_| window.set_resizable(!request.collapsed))
+            .map_err(|_| ApiError::new("INTERNAL_ERROR", "无法调整悬浮窗"))?;
+        if layout.collapsed != request.collapsed {
+            // Keep the right edge in place when the far-right fold control is used.
+            let width = (request.width * scale).round() as i32;
+            window
+                .set_position(tauri::PhysicalPosition::new(
+                    position.x + before.width as i32 - width,
+                    position.y,
+                ))
+                .map_err(|_| ApiError::new("INTERNAL_ERROR", "无法调整窗口位置"))?;
+        }
+        layout.collapsed = request.collapsed;
+        if !request.collapsed {
+            layout.expanded_width = request.width;
+        }
+        Ok(json!({"accepted":true}))
+    })();
+    Ok(respond(&service, result))
+}
 #[tauri::command]
 async fn hud_v1_window_control(
     window: WebviewWindow,
@@ -653,6 +731,7 @@ pub fn run() {
         }
     }
     tauri::Builder::default()
+        .manage(HudLayoutState::default())
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             let _ = window_action(app, "show");
         }))
@@ -681,7 +760,8 @@ pub fn run() {
             hud_internal_source_get,
             hud_internal_source_choose,
             hud_internal_source_rescan,
-            hud_internal_theme_get
+            hud_internal_theme_get,
+            hud_internal_window_layout
         ])
         .setup(|app| {
             if smoke::is_enabled() {
@@ -819,7 +899,21 @@ pub fn run() {
                     }
                     tauri::WindowEvent::Moved(position) => {
                         if let Some(service) = window.app_handle().try_state::<Service>() {
-                            service.remember_position(position.x, position.y)
+                            if let Some(layout) = window.app_handle().try_state::<HudLayoutState>()
+                            {
+                                // Programmatic size changes may dispatch a move while
+                                // the layout lock is held. Never block the UI thread.
+                                if let Ok(layout) = layout.0.try_lock() {
+                                    let offset = if layout.collapsed {
+                                        ((layout.expanded_width - HUD_ORB_SIZE).max(0.0)
+                                            * window.scale_factor().unwrap_or(1.0))
+                                        .round() as i32
+                                    } else {
+                                        0
+                                    };
+                                    service.remember_position(position.x - offset, position.y);
+                                }
+                            }
                         }
                     }
                     _ => {}
