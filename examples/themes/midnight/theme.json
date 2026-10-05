@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "minHudVersion": "0.1.0",
+  "id": "midnight",
+  "name": "午夜蓝",
+  "author": "Chatgpt HUD contributors",
+  "description": "深色紧凑布局；所有额度窗口和状态均由宿主呈现。",
+  "tokens": {
+    "colors": {
+      "background": "#111827",
+      "surface": "#1F2937",
+      "text": "#F9FAFB",
+      "textMuted": "#CBD5E1",
+      "border": "#94A3B8",
+      "accent": "#93C5FD",
+      "accentText": "#111827",
+      "success": "#86EFAC",
+      "warning": "#FDE68A",
+      "exhausted": "#FDBA74",
+      "error": "#FCA5A5",
+      "unknown": "#CBD5E1",
+      "stale": "#D8B4FE"
+    },
+    "typography": { "fontFamily": "system", "fontSize": 13, "lineHeight": 1.5 },
+    "spacing": { "padding": 8, "gap": 8 },
+    "radius": 10
+  },
+  "layout": {
+    "preset": "compact-rows",
+    "density": "compact",
+    "quotaVisualization": "text",
+    "regionOrder": ["accounts", "recommendation"],
+    "accountSlots": ["account-label", "quota-windows", "availability"]
+  }
+}

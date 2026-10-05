@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-hud-internal-source-rescan"
+description = "Enables the hud_internal_source_rescan command without any pre-configured scope."
+commands.allow = ["hud_internal_source_rescan"]
+
+[[permission]]
+identifier = "deny-hud-internal-source-rescan"
+description = "Denies the hud_internal_source_rescan command without any pre-configured scope."
+commands.deny = ["hud_internal_source_rescan"]

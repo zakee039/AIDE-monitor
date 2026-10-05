@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-hud-v1-themes-select"
+description = "Enables the hud_v1_themes_select command without any pre-configured scope."
+commands.allow = ["hud_v1_themes_select"]
+
+[[permission]]
+identifier = "deny-hud-v1-themes-select"
+description = "Denies the hud_v1_themes_select command without any pre-configured scope."
+commands.deny = ["hud_v1_themes_select"]

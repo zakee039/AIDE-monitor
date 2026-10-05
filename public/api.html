@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chatgpt HUD — API reference</title>
+<style>body{margin:0;background:#faf6ec;color:#293b38;font:16px/1.7 system-ui,sans-serif}main{max-width:1040px;margin:40px auto;padding:24px}a{color:#237b74}h1{font-size:38px}h2{margin-top:38px}code,pre{font-family:Consolas,monospace;background:#eeeee4;border-radius:5px}code{padding:2px 5px}pre{padding:20px;overflow:auto}table{border-collapse:collapse;width:100%;background:#fffdf6}td,th{text-align:left;padding:13px;border-bottom:1px solid #dedfd4;vertical-align:top}header{border-top:4px solid #39c5bb}.tag{color:#25786e}small{color:#63736e}button{float:right;padding:8px 16px;border:1px solid #abc0b6;background:#f3fcf5;border-radius:7px;cursor:pointer}[hidden]{display:none}</style>
+<main><header><button onclick="setLanguage(document.documentElement.lang==='en'?'zh-CN':'en')">English / 中文</button><p class="tag">Chatgpt HUD · 0.2.0 · API 1.0</p><h1>API reference <small>/ 接口说明</small></h1></header>
+<p data-en>These methods are available to the app's trusted Tauri windows. Version 0.2.0 does not expose an HTTP server or grant external webpages access. Themes are validated JSON data, not executable plugins.</p>
+<p data-zh hidden>这些方法通过应用内 Tauri 接口向受信任窗口提供。0.2.0 尚未开放 HTTP 服务，外部网页不能直接调用。主题为经过校验的 JSON 数据，不执行插件代码。</p>
+<h2>Call a method / 调用方法</h2><pre>import { invoke } from '@tauri-apps/api/core';
+const result = await invoke('hud_v1_quota_snapshot_get', { request: {} });
+if (result.ok) console.log(result.data.recommendation);
+else console.error(result.error.code);
+
+// Logical names map to hud_v1_ + dots replaced by underscores.
+// accounts.alias.update → hud_v1_accounts_alias_update</pre>
+<p data-en>Responses contain <code>apiVersion, requestId, instanceId, revision, generatedAt, ok</code> and either <code>data</code> or <code>error</code>. Revision numbers are only comparable within one instanceId. Query capabilities first; the settings window has 17 public methods, the HUD has 9.</p>
+<p data-zh hidden>返回值包含 <code>apiVersion, requestId, instanceId, revision, generatedAt, ok</code>，以及 <code>data</code> 或 <code>error</code>。revision 仅在同一个 instanceId 内可比较。先查询 capabilities：设置窗口提供 17 个公开方法，HUD 提供 9 个。</p>
+<h2>Methods / 方法</h2><p>★ Settings window only / 仅设置窗口</p><table><thead><tr><th>Method</th><th>Parameters</th><th>Result / 作用</th></tr></thead><tbody>
+<tr><td>capabilities.get</td><td>{}</td><td>Supported methods, scopes and versions / 支持的能力与版本</td></tr>
+<tr><td>accounts.list</td><td>{}</td><td>Accounts without credentials / 账号列表，不含凭据</td></tr>
+<tr><td>accounts.selection.update ★</td><td>expectedRevision, accountIds, aliases?</td><td>Persist selection and order / 保存选择与顺序</td></tr>
+<tr><td>accounts.alias.update ★</td><td>accountId, alias</td><td>Save display name; empty restores original, max 80 characters / 保存别名，空值恢复原名，上限 80 字符</td></tr>
+<tr><td>quota.snapshot.get</td><td>{}</td><td>Accounts, quota windows, availability, recommendation and source / 完整配额快照</td></tr>
+<tr><td>recommendation.get</td><td>{}</td><td>Recommended account and estimated availability / 推荐账号与预计可用时间</td></tr>
+<tr><td>refresh.request</td><td>accountIds? (omit for selected accounts)</td><td>Asynchronous refresh ticket / 异步刷新任务；省略账号则刷新已选账号</td></tr>
+<tr><td>refresh.status.get</td><td>jobId</td><td>Refresh job progress / 刷新进度</td></tr>
+<tr><td>settings.get</td><td>{}</td><td>Settings and settingsRevision / 读取设置及版本号</td></tr>
+<tr><td>settings.update ★</td><td>expectedRevision, autoRefresh?, refreshIntervalSeconds?, display?</td><td>Persist settings; display.locale: en or zh-CN / 保存设置；刷新间隔 60–1800 秒</td></tr>
+<tr><td>themes.list</td><td>{}</td><td>Built-in and imported themes / 内置和自定义主题</td></tr>
+<tr><td>themes.validate ★</td><td>document</td><td>Validation issues / 主题校验结果</td></tr>
+<tr><td>themes.preview ★</td><td>document</td><td>Preview identifier / 预览标识，不修改当前主题</td></tr>
+<tr><td>themes.import ★</td><td>{}</td><td>Native JSON picker; cancelled, theme / 打开本地主题选择器</td></tr>
+<tr><td>themes.select ★</td><td>id, expectedRevision</td><td>Persist active theme / 保存当前主题</td></tr>
+<tr><td>window.control</td><td>action: show | hide | restore_position | open_settings</td><td>accepted / 窗口操作</td></tr>
+<tr><td>diagnostics.get ★</td><td>{}</td><td>Versions and sanitized status / 版本与脱敏诊断信息</td></tr>
+</tbody></table>
+<h2>Events / 事件</h2><pre>import { listen } from '@tauri-apps/api/event';
+const stop = await listen('hud://v1/event', ({ payload }) =&gt; {
+  // Refetch the relevant authoritative snapshot/settings.
+});
+// Call stop() when the view is disposed.</pre>
+<p><code>snapshot.changed</code> · <code>refresh.progress</code> · <code>refresh.completed</code> · <code>source.changed</code> · <code>settings.changed</code> · <code>theme.changed</code> · <code>resync.required</code></p>
+<p data-en>Events are invalidation notices. Re-read authoritative data; subscribe before the first read. On a changed instanceId or resync.required, fetch a new snapshot. Settings writes use optimistic concurrency: on CONFLICT, reload before retrying. Alias updates affect only one alias and do not change account selection.</p>
+<p data-zh hidden>事件用于通知数据失效，应重新读取快照；首次读取前先订阅。instanceId 变化或收到 resync.required 时重新同步。设置写入使用乐观锁，遇到 CONFLICT 需重新读取。别名接口只更改单个别名，不更改账号选择。</p>
+<h2>Accounts & quota / 账号与配额</h2><p data-en>Only ChatGPT sign-ins are imported; API-key entries are excluded. Automatic discovery checks CODEX_HOME/auth.json (default ~/.codex/auth.json), then Cockpit Tools. OS keyrings and memory-only credentials are not supported. isCurrent means the identity in the selected official auth file at the last scan; it does not identify every open chat's active account. Rescan after switching accounts. Source files are never modified; sign in again in the original app when authentication expires.</p>
+<p data-zh hidden>仅导入 ChatGPT 登录账号，排除 API Key。自动发现优先检查 CODEX_HOME/auth.json（默认 ~/.codex/auth.json），然后检查 Cockpit Tools。暂不读取系统凭据库或仅内存凭据。isCurrent 仅表示上次扫描时官方文件保存的账号，不代表每个已打开会话的账号。切换账号后请重新扫描。源文件只读，凭据过期时请在原应用重新登录。</p>
+<p data-en>Recommendation requires at least 5% in the 5-hour window and 2% in the weekly window. Unknown or stale data is not treated as available. R is the reset credits reported by the upstream service, not a locally counted number of resets.</p>
+<p data-zh hidden>推荐当前可用账号要求 5 小时剩余额度至少 5%、周额度至少 2%；未知或过期数据不会当作可用。R 是上游报告的可用重置次数，不是本机累计计数。</p>
+<h2>Source / 源码</h2><p><a href="https://github.com/zakee039/chatgpt-HUD/blob/main/contracts/hud-api.ts">TypeScript contract</a> · <a href="https://github.com/zakee039/chatgpt-HUD">GitHub</a> · <a href="theme-template.json" download="theme.json">Theme example / 主题示例</a></p></main>
+<script>function setLanguage(lang){document.documentElement.lang=lang;document.querySelectorAll('[data-en]').forEach(x=>x.hidden=lang!=='en');document.querySelectorAll('[data-zh]').forEach(x=>x.hidden=lang==='en');}setLanguage(new URLSearchParams(location.search).get('lang')==='zh-CN'?'zh-CN':'en');</script></html>

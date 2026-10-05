@@ -1,0 +1,42 @@
+[package]
+name = "chatgpt-hud"
+version = "0.2.0"
+description = "A read-only quota HUD for Cockpit Tools"
+edition = "2021"
+publish = false
+
+[lib]
+name = "chatgpt_hud"
+crate-type = ["rlib"]
+
+[features]
+default = []
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.5", features = ["tray-icon", "image-png"] }
+tauri-plugin-dialog = "2.7.2"
+tauri-plugin-single-instance = "2.4.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4.45", features = ["serde"] }
+tokio = { version = "1", features = ["sync", "time", "rt-multi-thread", "macros", "net", "io-util"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls", "json", "stream"] }
+aes-gcm = "0.10"
+base64 = "0.22"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4", "serde"] }
+futures-util = "0.3"
+httpdate = "1"
+tempfile = "3"
+semver = "1"
+jsonschema = { version = "0.58.5", default-features = false }
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+strip = true
+codegen-units = 1

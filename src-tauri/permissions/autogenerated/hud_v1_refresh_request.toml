@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-hud-v1-refresh-request"
+description = "Enables the hud_v1_refresh_request command without any pre-configured scope."
+commands.allow = ["hud_v1_refresh_request"]
+
+[[permission]]
+identifier = "deny-hud-v1-refresh-request"
+description = "Denies the hud_v1_refresh_request command without any pre-configured scope."
+commands.deny = ["hud_v1_refresh_request"]

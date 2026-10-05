@@ -1,0 +1,6 @@
+{
+  "identifier": "settings",
+  "description": "Trusted built-in settings window",
+  "windows": ["settings"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "hud-read", "hud-actions", "settings-actions"]
+}

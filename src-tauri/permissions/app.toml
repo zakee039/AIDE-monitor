@@ -1,0 +1,14 @@
+[[permission]]
+identifier = "hud-read"
+description = "Read redacted HUD data and installed theme metadata"
+commands.allow = ["hud_v1_capabilities_get", "hud_v1_accounts_list", "hud_v1_quota_snapshot_get", "hud_v1_recommendation_get", "hud_v1_refresh_status_get", "hud_v1_settings_get", "hud_v1_themes_list", "hud_internal_theme_get"]
+
+[[permission]]
+identifier = "hud-actions"
+description = "Refresh selected accounts and control trusted windows"
+commands.allow = ["hud_v1_refresh_request", "hud_v1_window_control"]
+
+[[permission]]
+identifier = "settings-actions"
+description = "Configure the HUD through its trusted settings window"
+commands.allow = ["hud_v1_accounts_selection_update", "hud_v1_accounts_alias_update", "hud_internal_theme_export", "hud_internal_docs_open", "hud_v1_settings_update", "hud_v1_themes_validate", "hud_v1_themes_preview", "hud_v1_themes_import", "hud_v1_themes_select", "hud_v1_diagnostics_get", "hud_internal_source_get", "hud_internal_source_choose", "hud_internal_source_rescan"]

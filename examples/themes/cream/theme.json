@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "minHudVersion": "0.1.0",
+  "id": "default",
+  "name": "奶油薄荷",
+  "tokens": {
+    "colors": {
+      "background": "#FAF6EC",
+      "surface": "#FFFCF5",
+      "text": "#303B37",
+      "textMuted": "#616C65",
+      "border": "#7D887D",
+      "accent": "#39C5BB",
+      "accentText": "#183C37",
+      "success": "#306C60",
+      "warning": "#805D21",
+      "exhausted": "#994726",
+      "error": "#AA3843",
+      "unknown": "#616C65",
+      "stale": "#746079"
+    },
+    "typography": {
+      "fontFamily": "system",
+      "fontSize": 12,
+      "lineHeight": 1.5
+    },
+    "spacing": {
+      "padding": 8,
+      "gap": 4
+    },
+    "radius": 8
+  },
+  "layout": {
+    "preset": "compact-rows",
+    "density": "compact",
+    "quotaVisualization": "text",
+    "regionOrder": [
+      "accounts",
+      "recommendation"
+    ],
+    "accountSlots": [
+      "account-label",
+      "quota-windows",
+      "availability"
+    ]
+  }
+}

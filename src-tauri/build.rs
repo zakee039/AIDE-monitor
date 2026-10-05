@@ -1,0 +1,42 @@
+fn main() {
+    // Link one manifest for both the application and native-dialog test executables.
+    // Embedding it again in the resource library creates duplicate manifest resources.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        let manifest = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("windows-app-manifest.xml");
+        println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
+        println!("cargo:rerun-if-changed=windows-app-manifest.xml");
+    }
+    static COMMANDS: &[&str] = &[
+        "hud_v1_capabilities_get",
+        "hud_v1_accounts_list",
+        "hud_v1_accounts_selection_update",
+        "hud_v1_accounts_alias_update",
+        "hud_internal_theme_export",
+        "hud_internal_docs_open",
+        "hud_v1_quota_snapshot_get",
+        "hud_v1_recommendation_get",
+        "hud_v1_refresh_request",
+        "hud_v1_refresh_status_get",
+        "hud_v1_settings_get",
+        "hud_v1_settings_update",
+        "hud_v1_themes_list",
+        "hud_v1_themes_validate",
+        "hud_v1_themes_preview",
+        "hud_v1_themes_import",
+        "hud_v1_themes_select",
+        "hud_v1_window_control",
+        "hud_v1_diagnostics_get",
+        "hud_internal_source_get",
+        "hud_internal_source_choose",
+        "hud_internal_source_rescan",
+        "hud_internal_theme_get",
+    ];
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest())
+            .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
+    )
+    .expect("Unable to prepare Tauri application");
+}

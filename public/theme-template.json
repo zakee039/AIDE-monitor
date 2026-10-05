@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "minHudVersion": "0.1.0",
+  "id": "forest-custom",
+  "name": "苔绿",
+  "description": "可复制修改的本地自定义主题示例。",
+  "tokens": {
+    "colors": {
+      "background": "#111D19",
+      "surface": "#1B2B23",
+      "text": "#F2F7F4",
+      "textMuted": "#BCD0C3",
+      "border": "#93AA9C",
+      "accent": "#B5E3CA",
+      "accentText": "#10231A",
+      "success": "#A7DFB7",
+      "warning": "#F2D393",
+      "exhausted": "#F5BB95",
+      "error": "#FFABB8",
+      "unknown": "#BCD0C3",
+      "stale": "#D5BEF6"
+    },
+    "typography": { "fontFamily": "system", "fontSize": 13, "lineHeight": 1.5 },
+    "spacing": { "padding": 12, "gap": 8 },
+    "radius": 12
+  },
+  "layout": {
+    "preset": "compact-rows",
+    "density": "compact",
+    "quotaVisualization": "bar-text",
+    "regionOrder": ["accounts", "recommendation"],
+    "accountSlots": ["account-label", "quota-windows", "availability"]
+  }
+}

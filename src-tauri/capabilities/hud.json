@@ -1,0 +1,15 @@
+{
+  "identifier": "hud",
+  "description": "Minimal permissions for the quota floating window",
+  "windows": [
+    "hud"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-start-dragging",
+    "hud-read",
+    "hud-actions",
+    "core:window:allow-set-size"
+  ]
+}

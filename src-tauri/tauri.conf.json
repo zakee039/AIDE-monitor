@@ -1,0 +1,61 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Chatgpt HUD",
+  "version": "0.2.0",
+  "identifier": "dev.chatgpt-hud.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "hud",
+        "title": "Chatgpt HUD",
+        "url": "index.html",
+        "width": 390,
+        "height": 80,
+        "minWidth": 360,
+        "minHeight": 64,
+        "decorations": false,
+        "skipTaskbar": true,
+        "transparent": false,
+        "alwaysOnTop": true,
+        "resizable": true,
+        "center": true,
+        "backgroundColor": "#FAF6EC",
+        "maxHeight": 560
+      }
+    ],
+    "security": {
+      "capabilities": [
+        "hud",
+        "settings"
+      ],
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "shortDescription": "Lightweight read-only quota HUD",
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "displayLanguageSelector": false,
+        "languages": [
+          "English",
+          "SimpChinese"
+        ]
+      }
+    }
+  }
+}
