@@ -7,8 +7,12 @@ export const quotaProviders = [
   { id: "grok", name: "Grok" }, { id: "claude", name: "Claude" },
 ];
 export const quotaProvider = (id: string) => ["codex", "codex_usage"].includes(id) ? "chatgpt" : id;
+export function availableQuotaProviders(accounts: AccountSummary[]) {
+  const ids = [...new Set(accounts.filter(a => a.selected).sort((a, b) => a.order - b.order).map(a => quotaProvider(a.providerId)))];
+  return ids.flatMap(id => quotaProviders.filter(p => p.id === id));
+}
 export function selectedQuotaProvider(settings: Settings, accounts: AccountSummary[]) {
-  const available = quotaProviders.filter(p => accounts.some(a => quotaProvider(a.providerId) === p.id));
+  const available = availableQuotaProviders(accounts);
   return available.find(p => p.id === settings.display.quotaProvider)?.id ?? available[0]?.id ?? "";
 }
 const profiles: Record<string, [string, string][]> = {
@@ -23,7 +27,7 @@ export function QuotaSettings({ settings, accounts, busy, onChange }: {
   onChange: (display: Partial<Settings["display"]>) => void;
 }) {
   const active = selectedQuotaProvider(settings, accounts);
-  const available = quotaProviders.filter(p => accounts.some(a => quotaProvider(a.providerId) === p.id));
+  const available = availableQuotaProviders(accounts);
   const save = (id: string, value: string) => {
     const quotaProfiles = Object.fromEntries(Object.entries(settings.display.quotaProfiles ?? {}).filter(([key]) => accounts.some(a => a.id === key)));
     if (value) quotaProfiles[id] = value; else delete quotaProfiles[id];
@@ -31,7 +35,7 @@ export function QuotaSettings({ settings, accounts, busy, onChange }: {
   };
   return <>
     <div className="setting-row"><strong>{t("悬浮窗额度显示")}</strong><select aria-label={t("悬浮窗额度显示")} value={active} disabled={busy || !available.length} onChange={e => onChange({ quotaProvider: e.target.value })}>
-      {!available.length && <option value="">{t("请先添加账号")}</option>}
+      {!available.length && <option value="">{t("请先选择账号")}</option>}
       {available.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
     </select></div>
     <p className="quota-help">{t("只累计所选平台中已勾选的账号。Antigravity 使用 Gemini 额度池。")}</p>

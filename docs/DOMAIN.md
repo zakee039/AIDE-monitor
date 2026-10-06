@@ -51,7 +51,7 @@ Rust 领域层计算配额状态与推荐结果，前端和主题只负责展示
 
 配额响应中一个基础槽位包含有效 604,800 秒百分比窗口、另一个槽位为 null 或不存在时，适配器将不存在的槽位标为 `not_applicable`。周窗口可以在 primary 或 secondary 中；存在但格式损坏的另一槽位仍为未知，不得按“只有周限额”放行。推荐阈值按真实时长应用：5H ≥ 5%，周 ≥ 2%；没有 5H 限制时只检查周额度。
 
-快照的 `totalQuota` 按 `display.quotaProvider` 单独统计已勾选账号，支持 chatgpt（含 codex / codex_usage）、claude、antigravity、grok。字段保留 percent / partial / weeklyScalePercent，新增 providerId、recommendation（该平台独立倒计时）、estimated（未返回订阅而暂按基础档估算）。平台下没有账号被勾选时返回未知总量，不混入其他平台。所选平台已不存在时按上述平台列表的固定顺序回退到已有平台。
+快照的 `totalQuota` 按 `display.quotaProvider` 单独统计已勾选账号，支持 chatgpt（含 codex / codex_usage）、claude、antigravity、grok。字段保留 percent / partial / weeklyScalePercent，新增 providerId、recommendation（该平台独立倒计时）、estimated（未返回订阅而暂按基础档估算）。平台下没有账号被勾选时返回未知总量，不混入其他平台。平台选项仅来自已勾选账号。所选平台不再包含已勾选账号时，按账号排序回退到第一个已选账号的平台，并持久化保存；没有已选账号时平台为空，选择控件禁用。
 
 设 H、W 为 0..100 的剩余百分数，m 为相对基础订阅的额度倍率（5h 账号指 5h 容量，纯周账号指周容量），r 为完整 5h 额度对应的本账号周额度比例（0..1），r0 为该平台基础档的比例。
 - 有 5h 限制：H < 5 或 W < 2 时贡献为 0，否则 `m × min(H, W/r)`。等于阈值仍计入。

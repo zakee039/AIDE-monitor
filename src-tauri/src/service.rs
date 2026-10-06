@@ -244,6 +244,7 @@ impl Service {
             })())
         };
         let mut d = self.data.lock().expect("service state");
+        let previous_settings_revision = d.config.settings.settings_revision;
         if d.generation != generation || d.config.source_path != root || d.config.sources != sources
         {
             return Err(ApiError::new("CONFLICT", "账号来源已变化，请重新扫描"));
@@ -328,11 +329,19 @@ impl Service {
                     .map(|a| a.summary.id.clone())
                     .collect::<HashSet<_>>();
                 config.selected_ids.retain(|id| known.contains(id));
-                if config.selected_ids != d.config.selected_ids {
+                let summaries: Vec<_> = accounts.iter().map(|a| a.summary.clone()).collect();
+                config.settings.display.quota_provider = crate::quota_total::effective_provider(
+                    &config.settings.display.quota_provider,
+                    &summaries,
+                )
+                .into();
+                let selection_changed = config.selected_ids != d.config.selected_ids
+                    || config.settings.display.quota_provider
+                        != d.config.settings.display.quota_provider;
+                if selection_changed {
                     config.settings.settings_revision += 1;
                 }
-                if config.id_map != d.config.id_map || config.selected_ids != d.config.selected_ids
-                {
+                if config.id_map != d.config.id_map || selection_changed {
                     self.save(&config)?;
                 }
                 let old_ids = d
@@ -355,7 +364,11 @@ impl Service {
             }
         }
         let status = d.source.clone();
+        let settings_changed = previous_settings_revision != d.config.settings.settings_revision;
         drop(d);
+        if settings_changed {
+            self.event("settings.changed", None);
+        }
         self.event("source.changed", None);
         self.event("snapshot.changed", None);
         Ok(status)
@@ -528,9 +541,8 @@ impl Service {
             .collect::<Vec<_>>();
         let recommendation = domain::recommend(&accounts, &availability, &quotas);
         let mut display = d.config.settings.display.clone();
-        let all_accounts: Vec<_> = d.accounts.iter().map(|a| a.summary.clone()).collect();
         display.quota_provider =
-            crate::quota_total::effective_provider(&display.quota_provider, &all_accounts).into();
+            crate::quota_total::effective_provider(&display.quota_provider, &accounts).into();
         let total_quota = crate::quota_total::calculate(&accounts, &quotas, now, &display);
         Snapshot {
             source: d.source.clone(),
@@ -644,6 +656,24 @@ impl Service {
         }
         let mut config = d.config.clone();
         config.selected_ids = patch.account_ids;
+        let selected_accounts: Vec<_> = config
+            .selected_ids
+            .iter()
+            .enumerate()
+            .filter_map(|(order, id)| {
+                d.accounts.iter().find(|a| &a.summary.id == id).map(|a| {
+                    let mut summary = a.summary.clone();
+                    summary.selected = true;
+                    summary.order = order as u64;
+                    summary
+                })
+            })
+            .collect();
+        config.settings.display.quota_provider = crate::quota_total::effective_provider(
+            &config.settings.display.quota_provider,
+            &selected_accounts,
+        )
+        .into();
         if let Some(aliases) = patch.aliases {
             for (id, alias) in aliases {
                 if !d.accounts.iter().any(|a| a.summary.id == id)
@@ -783,12 +813,12 @@ impl Service {
         if let Some(display) = patch.display {
             if let Some(v) = display.quota_provider {
                 if !crate::quota_total::PROVIDERS.contains(&v.as_str())
-                    || !d
-                        .accounts
-                        .iter()
-                        .any(|a| crate::quota_total::provider(&a.summary.provider_id) == v)
+                    || !d.accounts.iter().any(|a| {
+                        a.summary.selected
+                            && crate::quota_total::provider(&a.summary.provider_id) == v
+                    })
                 {
-                    return Err(ApiError::new("INVALID_ARGUMENT", "请选择已有账号的平台"));
+                    return Err(ApiError::new("INVALID_ARGUMENT", "请选择已勾选账号的平台"));
                 }
                 config.settings.display.quota_provider = v;
             }
@@ -1939,6 +1969,75 @@ mod tests {
         Service::invalidate(&mut d);
         drop(d);
         drop(permits);
+    }
+
+    #[test]
+    fn quota_platform_selection_falls_back_and_persists() {
+        let (_dir, service, id) = synthetic_service();
+        {
+            let mut d = service.data.lock().unwrap();
+            let mut extra = d.accounts[0].clone();
+            extra.summary.id = "claude-test".into();
+            extra.summary.provider_id = "claude".into();
+            extra.summary.selected = false;
+            d.accounts.push(extra);
+        }
+        let select = |ids: Vec<String>| {
+            service
+                .select_accounts(AccountSelectionPatch {
+                    expected_revision: service.settings().settings_revision,
+                    account_ids: ids,
+                    aliases: None,
+                })
+                .unwrap()
+        };
+        // An existing, unselected platform cannot be chosen explicitly.
+        assert!(service
+            .update_settings(
+                serde_json::from_value(serde_json::json!({
+                    "expectedRevision":service.settings().settings_revision,
+                    "display":{"quotaProvider":"claude"}
+                }))
+                .unwrap()
+            )
+            .is_err());
+        assert_eq!(
+            select(vec!["claude-test".into()]).display.quota_provider,
+            "claude"
+        );
+        assert_eq!(
+            config::load(&service.config_path)
+                .unwrap()
+                .settings
+                .display
+                .quota_provider,
+            "claude"
+        );
+        // Reordering preserves a platform that still has selected accounts.
+        assert_eq!(
+            select(vec![id.clone(), "claude-test".into()])
+                .display
+                .quota_provider,
+            "claude"
+        );
+        assert_eq!(select(vec![]).display.quota_provider, "");
+        assert_eq!(
+            select(vec!["claude-test".into(), id.clone()])
+                .display
+                .quota_provider,
+            "claude"
+        );
+        // A rescan removes the synthetic Claude account and persists the fallback.
+        service.rescan().unwrap();
+        assert_eq!(service.settings().display.quota_provider, "chatgpt");
+        assert_eq!(
+            config::load(&service.config_path)
+                .unwrap()
+                .settings
+                .display
+                .quota_provider,
+            "chatgpt"
+        );
     }
 
     #[test]

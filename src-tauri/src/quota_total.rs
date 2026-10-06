@@ -64,18 +64,20 @@ fn base_ratio(platform: &str) -> f64 {
     }
 }
 
-pub fn effective_provider<'a>(requested: &'a str, accounts: &[AccountSummary]) -> &'a str {
+pub fn effective_provider<'a>(requested: &'a str, accounts: &'a [AccountSummary]) -> &'a str {
     if PROVIDERS.contains(&requested)
         && accounts
             .iter()
-            .any(|a| provider(&a.provider_id) == requested)
+            .any(|a| a.selected && provider(&a.provider_id) == requested)
     {
         return requested;
     }
-    PROVIDERS
-        .into_iter()
-        .find(|p| accounts.iter().any(|a| provider(&a.provider_id) == *p))
-        .unwrap_or("chatgpt")
+    accounts
+        .iter()
+        .filter(|a| a.selected && PROVIDERS.contains(&provider(&a.provider_id)))
+        .min_by_key(|a| a.order)
+        .map(|a| provider(&a.provider_id))
+        .unwrap_or("")
 }
 
 fn scoped_quota(q: &AccountQuota, platform: &str) -> AccountQuota {
@@ -202,6 +204,25 @@ mod tests {
             support: "supported".into(),
         }
     }
+    #[test]
+    fn provider_fallback_uses_only_selected_accounts_in_user_order() {
+        let mut accounts = vec![
+            account("a", "codex"),
+            account("b", "claude"),
+            account("c", "grok"),
+        ];
+        accounts[0].selected = false;
+        accounts[1].order = 2;
+        accounts[2].order = 1;
+        assert_eq!(effective_provider("chatgpt", &accounts), "grok");
+        assert_eq!(effective_provider("claude", &accounts), "claude");
+        accounts[1].selected = false;
+        accounts[2].selected = false;
+        assert_eq!(effective_provider("grok", &accounts), "");
+        accounts[0].selected = true;
+        assert_eq!(effective_provider("", &accounts), "chatgpt");
+    }
+
     fn quota(id: &str, five: Option<f64>, week: f64, now: DateTime<Utc>) -> AccountQuota {
         let mut q = AccountQuota::empty(id);
         q.origin = "network".into();

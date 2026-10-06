@@ -1,6 +1,13 @@
 # AIDE monitor
 
-AIDE monitor（AI IDE monitor），专业的 AI IDE 订阅额度监视器。集中监控多账号配额与恢复时间，支持桌面悬浮窗和 USB 屏幕，基于 Tauri 2、Rust、React。当前版本 **0.5.2**。
+AIDE monitor（AI IDE monitor），专业的 AI IDE 订阅额度监视器。集中监控多账号配额与恢复时间，支持桌面悬浮窗和 USB 屏幕，基于 Tauri 2、Rust、React。当前版本 **0.5.3**。
+
+## 0.5.3
+
+- 悬浮窗额度平台仅显示已勾选账号的平台。当前平台失效时，按账号排序自动回退到第一个已选账号的平台，并保存结果。
+- 未选择账号时禁用平台选择；重新扫描账号时同步处理平台回退。
+
+[0.5.3 版本说明](docs/releases/v0.5.3.md)
 
 ## 0.5.2
 
@@ -76,7 +83,7 @@ powershell -ExecutionPolicy Bypass -File tools/build-artifacts.ps1
 .\tools\pack-theme.ps1
 ```
 
-发布产物统一位于 `artifacts/release-v0.5.2/`，包括独立运行 EXE、安装包、便携 ZIP 与 SHA-256 校验文件。本版继续使用已有应用标识以保留账号设置；旧第三方 JSON 主题不迁移。
+发布产物统一位于 `artifacts/release-v0.5.3/`，包括独立运行 EXE、安装包、便携 ZIP 与 SHA-256 校验文件。本版继续使用已有应用标识以保留账号设置；旧第三方 JSON 主题不迁移。
 
 ## 项目资料
 

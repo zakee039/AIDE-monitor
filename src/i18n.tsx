@@ -5,6 +5,7 @@ export function setLanguage(locale: string) { language = locale; }
 const en: Record<string, string> = {
   "悬浮窗额度显示": "Floating quota display",
   "悬浮窗额度": "Floating quota",
+  "请先选择账号": "Select an account first",
   "请先添加账号": "Add an account first",
   "只累计所选平台中已勾选的账号。Antigravity 使用 Gemini 额度池。": "Only selected accounts on this platform count. Antigravity uses the Gemini pool.",
   "订阅额度换算（估算）": "Subscription conversion (estimated)",
