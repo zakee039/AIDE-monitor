@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-hud-internal-sources-pick"
+description = "Enables the hud_internal_sources_pick command without any pre-configured scope."
+commands.allow = ["hud_internal_sources_pick"]
+
+[[permission]]
+identifier = "deny-hud-internal-sources-pick"
+description = "Denies the hud_internal_sources_pick command without any pre-configured scope."
+commands.deny = ["hud_internal_sources_pick"]

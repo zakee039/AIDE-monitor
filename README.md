@@ -1,4 +1,21 @@
-# Chatgpt HUD
+# AIDE monitor
+
+## AIDE monitor 0.3.0
+
+已更名为 **AIDE monitor**：#39C5BB 的 M 标志搭配两侧发箍。新增 Windows 开机自启开关、精简设置页、平台图标和多数据源选择弹窗。
+
+- 平台：Codex、Claude OAuth、Antigravity、Grok CLI OAuth。按平台读取真实窗口／模型额度；不把缺失数据当满额。
+- 来源：Cockpit 多平台账号；CC Switch 只读数据库中的 OAuth 配置；CLIProxyAPI OAuth JSON；Sub2API 本地账号导出 JSON；官方 Codex / Claude 本地登录文件。
+- 在“常规 → 数据源 → 选择源”勾选多个来源，选择目录后保存并扫描。只扫描所选位置及约定子目录。
+- 开机自启只写当前 Windows 用户的启动项，无需管理员权限；关闭开关会移除该项。默认为关闭。
+- 保留已有应用标识和数据目录，升级继续使用 v0.2.3 的设置与账号别名。
+- Codex 总额度估算仅统计 Codex；其他平台不与它相加。Antigravity / Grok 的模型或产品额度不推断为整个账号可用。
+
+**兼容边界：** CC Switch 的任意 API Key／自定义余额脚本不执行；Sub2API 当前读取导出文件，不直连远程管理服务或 PostgreSQL。登录过期时在原客户端重新登录。本版未使用真实账号执行新增平台网络联调。
+
+[本地安装包](artifacts/AIDE-monitor-0.3.0-windows-x64-setup.exe) · [直接运行](artifacts/AIDE-monitor-0.3.0-windows-x64.exe) · [支持矩阵与验证记录](docs/releases/v0.3.0.md)
+
+下方保留 v0.2.x 的使用说明与历史发布记录。
 
 A compact Windows quota HUD built with **Tauri 2 + Rust + React / TypeScript**. Cream background, mint accent (`#39C5BB`), tray controls and custom JSON themes. No Electron.
 

@@ -1,13 +1,14 @@
 {
-  "name": "chatgpt-hud",
+  "name": "aide-monitor",
   "private": true,
-  "version": "0.2.3",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 1420 --strictPort",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test": "node --test tests/*.test.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.1",

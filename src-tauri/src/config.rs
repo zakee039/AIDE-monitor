@@ -12,6 +12,7 @@ use std::{
 pub struct Config {
     pub config_version: u32,
     pub settings: Settings,
+    pub sources: Vec<crate::adapters::sources::SourceOption>,
     pub source_path: Option<PathBuf>,
     pub id_map: HashMap<String, String>,
     pub selected_ids: Vec<String>,
@@ -24,6 +25,7 @@ impl Default for Config {
             config_version: 1,
             settings: Settings::default(),
             source_path: None,
+            sources: vec![],
             id_map: HashMap::new(),
             selected_ids: vec![],
             aliases: HashMap::new(),

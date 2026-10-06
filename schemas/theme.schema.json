@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Chatgpt HUD Theme V1",
+  "title": "AIDE monitor Theme V1",
   "description": "Declarative local theme contract. Version comparison, contrast, reserved IDs, file limits and safe rendering require host validation.",
   "type": "object",
   "additionalProperties": false,

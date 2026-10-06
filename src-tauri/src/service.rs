@@ -1,5 +1,5 @@
 use crate::{
-    adapters::{source as cockpit, usage},
+    adapters::{sources as cockpit, usage},
     config::{self, Config},
     domain,
     model::*,
@@ -20,6 +20,7 @@ use tauri::{AppHandle, Emitter};
 struct Entry {
     summary: AccountSummary,
     source_id: String,
+    root: PathBuf,
     base_name: String,
 }
 struct Data {
@@ -188,13 +189,54 @@ impl Service {
         }
     }
     pub fn rescan(&self) -> Result<SourceStatus, ApiError> {
-        let (root, generation) = {
+        let (root, sources, generation) = {
             let d = self.data.lock().expect("service state");
-            (d.config.source_path.clone(), d.generation)
+            (
+                d.config.source_path.clone(),
+                d.config.sources.clone(),
+                d.generation,
+            )
         };
-        let result = root.as_deref().map(cockpit::list_accounts);
+        let roots: Vec<PathBuf> = if sources.is_empty() {
+            root.clone().into_iter().collect()
+        } else {
+            sources
+                .iter()
+                .filter(|s| s.enabled)
+                .filter_map(|s| s.path.clone())
+                .collect()
+        };
+        let mut catalog_roots = HashMap::new();
+        let result = if roots.is_empty() {
+            None
+        } else {
+            Some((|| {
+                let mut combined = crate::adapters::cockpit::SourceCatalog {
+                    accounts: vec![],
+                    format: "unknown".into(),
+                };
+                let mut seen = HashSet::new();
+                for path in &roots {
+                    let canonical = path.canonicalize().map_err(|_| {
+                        ApiError::new("SOURCE_NOT_FOUND", "已选择的数据源目录不可用")
+                    })?;
+                    if !seen.insert(canonical.clone()) {
+                        continue;
+                    }
+                    for mut account in cockpit::list_accounts(&canonical)?.accounts {
+                        let original = account.source_id.clone();
+                        let key = format!("{}\n{}", canonical.to_string_lossy(), original);
+                        catalog_roots.insert(key.clone(), (canonical.clone(), original));
+                        account.source_id = key;
+                        combined.accounts.push(account);
+                    }
+                }
+                Ok::<_, ApiError>(combined)
+            })())
+        };
         let mut d = self.data.lock().expect("service state");
-        if d.generation != generation || d.config.source_path != root {
+        if d.generation != generation || d.config.source_path != root || d.config.sources != sources
+        {
             return Err(ApiError::new("CONFLICT", "账号来源已变化，请重新扫描"));
         }
         match result {
@@ -225,15 +267,12 @@ impl Service {
             Some(Ok(catalog)) => {
                 let mut config = d.config.clone();
                 let mut accounts = vec![];
-                let root_key = root
-                    .as_ref()
-                    .unwrap()
-                    .canonicalize()
-                    .unwrap_or_else(|_| root.as_ref().unwrap().clone())
-                    .to_string_lossy()
-                    .into_owned();
                 for (index, account) in catalog.accounts.into_iter().enumerate() {
-                    let key = format!("{root_key}\n{}", account.source_id);
+                    let key = account.source_id.clone();
+                    let (account_root, original_id) = catalog_roots
+                        .get(&key)
+                        .cloned()
+                        .ok_or_else(|| ApiError::new("INTERNAL_ERROR", "账号来源失效"))?;
                     let id = config
                         .id_map
                         .entry(key)
@@ -265,12 +304,13 @@ impl Service {
                             display_name,
                             alias: config.aliases.get(&id).cloned(),
                             is_current: account.is_current,
-                            provider_id: "codex_usage".into(),
+                            provider_id: account.provider_id,
                             selected,
                             order,
                             support: account.support,
                         },
-                        source_id: account.source_id,
+                        source_id: original_id,
+                        root: account_root,
                         base_name,
                     });
                 }
@@ -311,6 +351,56 @@ impl Service {
         self.event("snapshot.changed", None);
         Ok(status)
     }
+    pub fn sources(&self) -> Vec<cockpit::SourceOption> {
+        let d = self.data.lock().expect("service state");
+        if !d.config.sources.is_empty() {
+            return d.config.sources.clone();
+        }
+        let mut options = cockpit::defaults();
+        if let Some(path) = &d.config.source_path {
+            let kind = if path.join("codex_accounts.json").exists()
+                || path.join("accounts.json").exists()
+            {
+                "cockpit"
+            } else {
+                "official"
+            };
+            if let Some(s) = options.iter_mut().find(|s| s.id == kind) {
+                s.enabled = true;
+                s.path = Some(path.clone());
+            }
+        }
+        options
+    }
+    pub fn set_sources(
+        &self,
+        mut sources: Vec<cockpit::SourceOption>,
+    ) -> Result<SourceStatus, ApiError> {
+        if sources.len() != cockpit::KINDS.len()
+            || sources.iter().map(|s| &s.id).collect::<HashSet<_>>().len() != sources.len()
+            || sources.iter().any(|s| {
+                !cockpit::KINDS.contains(&s.id.as_str()) || (s.enabled && s.path.is_none())
+            })
+        {
+            return Err(ApiError::new("INVALID_ARGUMENT", "请选择有效的数据源目录"));
+        }
+        for s in &mut sources {
+            if s.enabled {
+                s.path = Some(cockpit::resolve_root(s.path.as_deref().unwrap(), &s.id)?);
+            }
+        }
+        {
+            let mut d = self.data.lock().expect("service state");
+            let mut config = d.config.clone();
+            config.sources = sources;
+            config.settings.settings_revision += 1;
+            self.save(&config)?;
+            Self::invalidate(&mut d);
+            d.config = config;
+        }
+        self.event("settings.changed", None);
+        self.rescan()
+    }
     pub fn choose_source(&self, path: PathBuf) -> Result<SourceStatus, ApiError> {
         let root = path
             .canonicalize()
@@ -320,6 +410,7 @@ impl Service {
             let mut d = self.data.lock().expect("service state");
             let mut config = d.config.clone();
             config.source_path = Some(root);
+            config.sources.clear();
             config.selected_ids.clear();
             config.settings.settings_revision += 1;
             self.save(&config)?;
@@ -766,14 +857,14 @@ impl Service {
         }
         let job_id = uuid::Uuid::new_v4().to_string();
         let generation = d.generation;
-        let root = d.config.source_path.clone().unwrap();
+
         let work = eligible
             .iter()
             .filter_map(|id| {
                 d.accounts
                     .iter()
                     .find(|a| &a.summary.id == id)
-                    .map(|a| (id.clone(), a.source_id.clone()))
+                    .map(|a| (id.clone(), a.source_id.clone(), a.root.clone()))
             })
             .collect::<Vec<_>>();
         for id in eligible {
@@ -800,9 +891,8 @@ impl Service {
         drop(d);
         self.event("refresh.progress", Some(job_id.clone()));
         self.event("snapshot.changed", None);
-        for (id, source_id) in work {
+        for (id, source_id, root) in work {
             let service = self.clone();
-            let root = root.clone();
             let job = job_id.clone();
             tauri::async_runtime::spawn(async move {
                 service
@@ -1019,7 +1109,7 @@ impl Service {
         let mut reset_keys = vec![];
         let rescan_due = d.config.settings.auto_refresh
             && d.source.state != "ready"
-            && d.config.source_path.is_some()
+            && (d.config.source_path.is_some() || d.config.sources.iter().any(|s| s.enabled))
             && Instant::now() >= d.next_source_scan;
         if rescan_due {
             d.next_source_scan = Instant::now() + Duration::from_secs(30);
@@ -1149,6 +1239,53 @@ impl Service {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn multiple_sources_preserve_ids_and_route_each_account_to_its_root() {
+        let (dir, service, id) = synthetic_service();
+        let root = service.source_path().unwrap();
+        let proxy = dir.path().join("proxy");
+        std::fs::create_dir(&proxy).unwrap();
+        std::fs::write(proxy.join("claude.json"),json!({"type":"claude","email":"synthetic@example.test","access_token":"synthetic-claude"}).to_string()).unwrap();
+        let mut options = cockpit::defaults();
+        for s in &mut options {
+            s.enabled = false;
+            s.path = None;
+            if s.id == "cockpit" {
+                s.enabled = true;
+                s.path = Some(root.clone());
+            }
+            if s.id == "cliproxyapi" {
+                s.enabled = true;
+                s.path = Some(proxy.clone());
+            }
+        }
+        service.set_sources(options.clone()).unwrap();
+        assert_eq!(service.accounts(true).len(), 2);
+        assert!(service.accounts(true).iter().any(|a| a.id == id));
+        let d = service.data.lock().unwrap();
+        let claude = d
+            .accounts
+            .iter()
+            .find(|a| a.summary.provider_id == "claude")
+            .unwrap();
+        assert_eq!(
+            cockpit::read_credentials(&claude.root, &claude.source_id)
+                .unwrap()
+                .access_token,
+            "synthetic-claude"
+        );
+        drop(d);
+        let raw = std::fs::read_to_string(dir.path().join("hud/settings.json")).unwrap();
+        assert!(!raw.contains("synthetic-claude"));
+        let reopened = Service::new(dir.path().join("hud"), None).unwrap();
+        assert_eq!(reopened.accounts(true).len(), 2);
+        for s in &mut options {
+            s.enabled = false;
+        }
+        reopened.set_sources(options).unwrap();
+        assert!(reopened.accounts(true).is_empty());
+        assert_eq!(reopened.snapshot().source.state, "not_configured");
+    }
     #[test]
     fn aliases_persist_without_changing_selection_or_refresh_generation() {
         let (dir, service, id) = synthetic_service();

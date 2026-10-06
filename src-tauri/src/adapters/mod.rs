@@ -4,3 +4,6 @@ pub mod cockpit;
 pub mod usage;
 
 pub mod source;
+
+pub mod providers;
+pub mod sources;

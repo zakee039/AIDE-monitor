@@ -17,11 +17,15 @@ pub async fn fetch_quota(
     credentials: &Credentials,
     hud_account_id: &str,
 ) -> Result<AccountQuota, ApiError> {
-    let response = quota_request(client, credentials)?
-        .send()
-        .await
-        .map_err(network_error)?;
-    read_response(response, hud_account_id).await
+    let response = (if credentials.provider == "codex_usage" {
+        quota_request(client, credentials)
+    } else {
+        super::providers::request(client, credentials)
+    })?
+    .send()
+    .await
+    .map_err(network_error)?;
+    read_provider_response(response, hud_account_id, &credentials.provider).await
 }
 
 fn quota_request(client: &Client, credentials: &Credentials) -> Result<RequestBuilder, ApiError> {
@@ -40,15 +44,24 @@ fn quota_request(client: &Client, credentials: &Credentials) -> Result<RequestBu
         .timeout(std::time::Duration::from_secs(15))
         .header(AUTHORIZATION, authorization)
         .header("ChatGPT-Account-Id", workspace)
-        .header("originator", "Chatgpt HUD")
+        .header("originator", "AIDE monitor")
         .header(
             "User-Agent",
-            concat!("Chatgpt-HUD/", env!("CARGO_PKG_VERSION")),
+            concat!("AIDE-monitor/", env!("CARGO_PKG_VERSION")),
         )
         .header("Accept", "application/json"))
 }
 
+#[cfg(test)]
 async fn read_response(response: Response, hud_account_id: &str) -> Result<AccountQuota, ApiError> {
+    read_provider_response(response, hud_account_id, "codex_usage").await
+}
+
+async fn read_provider_response(
+    response: Response,
+    hud_account_id: &str,
+    provider: &str,
+) -> Result<AccountQuota, ApiError> {
     let observed_at = Utc::now();
     let status = response.status();
     if !status.is_success() {
@@ -71,7 +84,11 @@ async fn read_response(response: Response, hud_account_id: &str) -> Result<Accou
         bytes.extend_from_slice(&chunk);
     }
     let value: Value = serde_json::from_slice(&bytes).map_err(|_| unsupported_response())?;
-    parse_usage(&value, hud_account_id, observed_at)
+    if provider == "codex_usage" {
+        parse_usage(&value, hud_account_id, observed_at)
+    } else {
+        super::providers::parse(&value, provider, hud_account_id, observed_at)
+    }
 }
 
 /// Missing or invalid measurements stay unknown. No missing window is treated as full quota.
@@ -362,6 +379,9 @@ mod tests {
             .build()
             .unwrap();
         let credentials = Credentials {
+            provider: "codex_usage".into(),
+            project_id: None,
+            gcp: false,
             access_token: "synthetic-access-token".into(),
             account_id: Some("synthetic-workspace".into()),
         };

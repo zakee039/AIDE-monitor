@@ -282,6 +282,10 @@ const SCRIPT: &str = r#"
     if (theme.id === 'default') assert(theme.tokens.colors.background === '#FAF6EC' && theme.tokens.colors.accent === '#39C5BB', 'CREAM_THEME_MISMATCH');
 
     if (label === 'settings') {
+      const sources = await call('hud_internal_sources_get');
+      assert(sources.length === 5 && sources.some(s => s.id === 'cockpit' && s.enabled), 'SOURCE_OPTIONS_MISSING');
+      const startup = await call('hud_internal_startup');
+      assert(typeof startup.enabled === 'boolean', 'STARTUP_STATUS_MISSING');
       const diagnostics = await call('hud_v1_diagnostics_get');
       assert(diagnostics.selectedAccountCount === 0 && diagnostics.activeJobCount === 0, 'DIAGNOSTICS_NOT_ISOLATED');
       const beforeUpdate = await call('hud_v1_settings_get');

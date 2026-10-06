@@ -231,6 +231,9 @@ pub fn total_quota(
             continue;
         }
         selected += 1;
+        if !matches!(account.provider_id.as_str(), "codex" | "codex_usage") {
+            continue;
+        }
         let Some(quota) = quotas.iter().find(|quota| quota.account_id == account.id) else {
             continue;
         };

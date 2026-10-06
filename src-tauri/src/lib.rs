@@ -4,6 +4,7 @@ mod domain;
 mod model;
 mod service;
 mod smoke;
+mod startup;
 mod themes;
 
 use model::*;
@@ -92,7 +93,12 @@ fn hud_v1_capabilities_get(
                 enabled_methods: methods.into_iter().map(str::to_owned).collect(),
                 granted_scopes: scopes.into_iter().map(str::to_owned).collect(),
                 theme_schema_versions: vec![1],
-                provider_ids: vec!["codex_usage".into()],
+                provider_ids: vec![
+                    "codex_usage".into(),
+                    "claude".into(),
+                    "antigravity".into(),
+                    "grok".into(),
+                ],
                 max_refresh_accounts: 100,
             }
         });
@@ -442,6 +448,84 @@ fn hud_internal_theme_get(
     )
 }
 #[tauri::command]
+fn hud_internal_sources_get(
+    window: WebviewWindow,
+    service: State<'_, Service>,
+    request: Value,
+) -> ApiResult<Value> {
+    respond(
+        &service,
+        authorize(&window, true)
+            .and_then(|_| empty(&request))
+            .map(|_| service.sources()),
+    )
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SourcesRequest {
+    sources: Vec<adapters::sources::SourceOption>,
+}
+#[tauri::command]
+fn hud_internal_sources_save(
+    window: WebviewWindow,
+    service: State<'_, Service>,
+    request: Value,
+) -> ApiResult<Value> {
+    respond(
+        &service,
+        authorize(&window, true)
+            .and_then(|_| parse::<SourcesRequest>(request))
+            .and_then(|r| service.set_sources(r.sources)),
+    )
+}
+#[tauri::command]
+async fn hud_internal_sources_pick(
+    window: WebviewWindow,
+    service: State<'_, Service>,
+    request: Value,
+) -> Result<ApiResult<Value>, String> {
+    if let Err(e) = authorize(&window, true).and_then(|_| empty(&request)) {
+        return Ok(respond::<Value>(&service, Err(e)));
+    }
+    let app = window.app_handle().clone();
+    let picked =
+        tauri::async_runtime::spawn_blocking(move || app.dialog().file().blocking_pick_folder())
+            .await;
+    Ok(respond(
+        &service,
+        match picked {
+            Ok(None) => Ok(json!({"path":null})),
+            Ok(Some(file)) => file
+                .into_path()
+                .map(|p| json!({"path":p}))
+                .map_err(|_| ApiError::new("IO_ERROR", "目录不可用")),
+            Err(_) => Err(ApiError::new("IO_ERROR", "无法选择目录")),
+        },
+    ))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StartupRequest {
+    enabled: Option<bool>,
+}
+#[tauri::command]
+fn hud_internal_startup(
+    window: WebviewWindow,
+    service: State<'_, Service>,
+    request: Value,
+) -> ApiResult<Value> {
+    respond(
+        &service,
+        authorize(&window, true)
+            .and_then(|_| parse::<StartupRequest>(request))
+            .and_then(|r| match r.enabled {
+                Some(v) => startup::set(v),
+                None => startup::enabled(),
+            })
+            .map(|v| json!({"enabled":v})),
+    )
+}
+#[tauri::command]
 fn hud_internal_source_get(
     window: WebviewWindow,
     service: State<'_, Service>,
@@ -528,9 +612,9 @@ fn open_settings(app: &tauri::AppHandle) -> Result<(), ApiError> {
         )
         .title(
             if app.state::<Service>().settings().display.locale == "zh-CN" {
-                "Chatgpt HUD · 设置"
+                "AIDE monitor · 设置"
             } else {
-                "Chatgpt HUD · Settings"
+                "AIDE monitor · Settings"
             },
         )
         .skip_taskbar(false)
@@ -591,9 +675,9 @@ fn sync_window_preferences(app: &tauri::AppHandle, settings: &Settings) {
     }
     if let Some(window) = app.get_webview_window("settings") {
         let _ = window.set_title(if zh {
-            "Chatgpt HUD · 设置"
+            "AIDE monitor · 设置"
         } else {
-            "Chatgpt HUD · Settings"
+            "AIDE monitor · Settings"
         });
     }
 
@@ -757,6 +841,10 @@ pub fn run() {
             hud_v1_themes_select,
             hud_v1_window_control,
             hud_v1_diagnostics_get,
+            hud_internal_sources_get,
+            hud_internal_sources_save,
+            hud_internal_sources_pick,
+            hud_internal_startup,
             hud_internal_source_get,
             hud_internal_source_choose,
             hud_internal_source_rescan,
@@ -846,7 +934,7 @@ pub fn run() {
                 ],
             )?;
             let mut tray = TrayIconBuilder::new()
-                .tooltip("Chatgpt HUD")
+                .tooltip("AIDE monitor")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -921,5 +1009,5 @@ pub fn run() {
             }
         })
         .run(context)
-        .expect("Unable to run Chatgpt HUD");
+        .expect("Unable to run AIDE monitor");
 }

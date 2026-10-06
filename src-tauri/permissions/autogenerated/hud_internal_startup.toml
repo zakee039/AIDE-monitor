@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-hud-internal-startup"
+description = "Enables the hud_internal_startup command without any pre-configured scope."
+commands.allow = ["hud_internal_startup"]
+
+[[permission]]
+identifier = "deny-hud-internal-startup"
+description = "Denies the hud_internal_startup command without any pre-configured scope."
+commands.deny = ["hud_internal_startup"]

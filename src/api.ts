@@ -41,7 +41,12 @@ export async function call<M extends keyof MethodMap>(method: M, params: MethodM
   return result;
 }
 
+export interface SourceOption { id: string; enabled: boolean; path: string | null }
 interface InternalMethods {
+  sources_get: { params: Record<string, never>; data: SourceOption[] };
+  sources_save: { params: { sources: SourceOption[] }; data: SourceStatus };
+  sources_pick: { params: Record<string, never>; data: { path: string | null } };
+  startup: { params: { enabled?: boolean }; data: { enabled: boolean } };
   window_layout: { params: { collapsed: boolean; width: number; height: number }; data: { accepted: boolean } };
   docs_open: { params: Record<string, never>; data: { opened: boolean } };
   theme_export: { params: Record<string, never>; data: { cancelled: boolean } };

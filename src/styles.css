@@ -270,10 +270,10 @@ select { min-height: 32px; font-size: 11px; border: 1px solid var(--border); bor
 .compact-quota > span:last-child { color: var(--text-muted); }
 .quota-dot { color: var(--text-muted); padding: 0 3px; }
 /* Identical quota thresholds for every built-in/custom theme; brightness follows the background. */
-.compact-quota.quota-red strong { color: var(--quota-red); }
-.compact-quota.quota-orange strong { color: var(--quota-orange); }
-.compact-quota.quota-blue strong { color: var(--quota-blue); }
-.compact-quota.quota-green strong { color: var(--quota-green); }
+.compact-quota.quota-red strong, .model-quota.quota-red strong { color: var(--quota-red); }
+.compact-quota.quota-orange strong, .model-quota.quota-orange strong { color: var(--quota-orange); }
+.compact-quota.quota-blue strong, .model-quota.quota-blue strong { color: var(--quota-blue); }
+.compact-quota.quota-green strong, .model-quota.quota-green strong { color: var(--quota-green); }
 .reset-credits { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-muted); }
 .hud-actions { display: flex; gap: 1px; margin-left: auto; flex-shrink: 0; align-self: center; }
 .hud-actions .row-refresh { width: 20px; height: 20px; }
@@ -386,3 +386,35 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline-color:
 .settings-sidebar { width: 150px; }
 .settings-content { width: calc(100% - 150px); }
 @media(max-width: 650px) { .selection-row { flex-wrap: wrap; } .alias-editor { margin-left: 32px; } }
+
+/* AIDE monitor: compact settings and source selection. */
+.brand-mark { width: 30px; height: 30px; flex-shrink: 0; }
+.provider-icon { background: #fff; border-radius: 3px; padding: 1px; width: 15px; height: 15px; object-fit: contain; flex-shrink: 0; }
+.compact-name { display: inline-flex; align-items: center; gap: 5px; }
+.settings-header { min-height: 56px; padding: 12px 22px; }
+.settings-content { padding: 22px 24px; }
+.settings-card { margin-bottom: 12px; border-radius: 9px; }
+.settings-card-heading { padding: 13px 16px; gap: 10px; }
+.settings-card-heading > button { margin-left: auto; }
+.settings-card-heading:only-child { margin-bottom: 0; }
+.setting-row { padding: 11px 16px; min-height: 48px; }
+.section-heading { margin-bottom: 16px; }
+.section-heading h1 { margin: 0; }
+.settings-content-footer { display: none; }
+.source-error { padding: 0 16px 12px; margin: 0; color: var(--error); }
+.source-dialog { width: min(520px, calc(100vw - 40px)); max-height: calc(100vh - 48px); overflow: auto; padding: 0; border: 1px solid #d8ded6; border-radius: 14px; background: #faf6ec; color: #303b37; box-shadow: 0 18px 65px #20352c33; }
+.source-dialog::backdrop { background: #162b2755; }
+.dialog-heading, .dialog-actions { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; gap: 10px; }
+.dialog-heading h2 { font-size: 17px; margin: 0; }
+.dialog-actions { justify-content: flex-end; border-top: 1px solid #e4e5dd; }
+.source-options { padding: 0 20px 10px; }
+.source-option { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 6px 12px; padding: 13px 0; border-top: 1px solid #e4e5dd; }
+.source-option label { display: flex; align-items: center; gap: 10px; }
+.source-option input { accent-color: #258c84; width: 16px; height: 16px; }
+.source-location { grid-column: 1 / -1; color: #65736a; font-size: 12px; overflow-wrap: anywhere; margin-left: 26px; }
+.source-option small { grid-column: 1 / -1; color: #65736a; margin-left: 26px; }
+.source-dialog button:focus-visible { outline: 2px solid #258c84; outline-offset: 3px; }
+.model-quotas { grid-column: 3 / -1; display:flex; flex-wrap:wrap; gap: 5px 14px; max-width: 580px; padding-left: 14px; }
+.model-quota { display:inline-flex; align-items:center; gap: 5px; white-space:nowrap; }
+.model-quota small { max-width: 150px; overflow:hidden; text-overflow:ellipsis; color:var(--text-muted); }
+@media(max-width:650px) { .settings-content { padding:16px; } .source-dialog { width:calc(100vw - 28px); } }

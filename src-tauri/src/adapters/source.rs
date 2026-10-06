@@ -145,19 +145,23 @@ fn official(root: &Path) -> Result<Option<(SourceAccount, Credentials)>, ApiErro
     );
     Ok(Some((
         SourceAccount {
+            provider_id: "codex_usage".into(),
             source_id: id,
             display_name: email.unwrap_or("Official account").to_owned(),
             support: "supported".into(),
             is_current: true,
         },
         Credentials {
+            provider: "codex_usage".into(),
+            project_id: None,
+            gcp: false,
             access_token: access.to_owned(),
             account_id: Some(workspace.to_owned()),
         },
     )))
 }
 
-pub fn list_accounts(root: &Path) -> Result<SourceCatalog, ApiError> {
+pub fn legacy_list_accounts(root: &Path) -> Result<SourceCatalog, ApiError> {
     if !is_official(root) {
         return cockpit::list_accounts(root);
     }
@@ -166,7 +170,7 @@ pub fn list_accounts(root: &Path) -> Result<SourceCatalog, ApiError> {
         format: "plaintext".into(),
     })
 }
-pub fn read_credentials(root: &Path, source_id: &str) -> Result<Credentials, ApiError> {
+pub fn legacy_read_credentials(root: &Path, source_id: &str) -> Result<Credentials, ApiError> {
     if !is_official(root) {
         return cockpit::read_credentials(root, source_id);
     }
@@ -196,11 +200,11 @@ mod tests {
         let path = dir.path().join("auth.json");
         std::fs::write(&path, fixture("first").to_string()).unwrap();
         let before = std::fs::read(&path).unwrap();
-        let first = list_accounts(dir.path()).unwrap().accounts.remove(0);
+        let first = legacy_list_accounts(dir.path()).unwrap().accounts.remove(0);
         assert!(first.is_current);
         assert_eq!(first.display_name, "synthetic@example.test");
         assert_eq!(
-            read_credentials(dir.path(), &first.source_id)
+            legacy_read_credentials(dir.path(), &first.source_id)
                 .unwrap()
                 .access_token,
             "synthetic-token"
@@ -208,10 +212,10 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), before);
         std::fs::write(&path, fixture("second").to_string()).unwrap();
         assert_ne!(
-            list_accounts(dir.path()).unwrap().accounts[0].source_id,
+            legacy_list_accounts(dir.path()).unwrap().accounts[0].source_id,
             first.source_id
         );
-        assert!(read_credentials(dir.path(), &first.source_id).is_err());
+        assert!(legacy_read_credentials(dir.path(), &first.source_id).is_err());
     }
     #[test]
     fn api_keys_and_unknown_official_auth_modes_are_not_imported() {
@@ -221,11 +225,14 @@ mod tests {
             json!({"auth_mode":"future"}),
         ] {
             std::fs::write(dir.path().join("auth.json"), v.to_string()).unwrap();
-            assert!(list_accounts(dir.path()).unwrap().accounts.is_empty());
+            assert!(legacy_list_accounts(dir.path())
+                .unwrap()
+                .accounts
+                .is_empty());
         }
         let mut bad = fixture("first");
         bad["tokens"]["account_id"] = json!(null);
         std::fs::write(dir.path().join("auth.json"), bad.to_string()).unwrap();
-        assert!(list_accounts(dir.path()).is_err());
+        assert!(legacy_list_accounts(dir.path()).is_err());
     }
 }

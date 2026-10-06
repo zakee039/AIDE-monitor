@@ -15,6 +15,7 @@ const MAX_SOURCE_ACCOUNTS: usize = 500;
 
 #[derive(Clone)]
 pub struct SourceAccount {
+    pub provider_id: String,
     pub source_id: String,
     pub display_name: String,
     pub support: String,
@@ -28,6 +29,9 @@ pub struct SourceCatalog {
 
 // Deliberately lacks Debug and Serialize: credentials must not enter logs or transports.
 pub struct Credentials {
+    pub(crate) provider: String,
+    pub(crate) project_id: Option<String>,
+    pub(crate) gcp: bool,
     pub(crate) access_token: String,
     pub(crate) account_id: Option<String>,
 }
@@ -115,6 +119,7 @@ fn read_catalog(root: &Path) -> Result<SourceCatalog, ApiError> {
             .map(str::to_owned)
             .unwrap_or_else(|| format!("账号 {}", order + 1));
         accounts.push(SourceAccount {
+            provider_id: "codex_usage".into(),
             source_id: id.to_owned(),
             display_name: name,
             support: "unknown".into(),
@@ -230,12 +235,18 @@ fn credentials_from_detail(value: &Value, source_id: &str) -> Result<Credentials
             )
         })?;
     Ok(Credentials {
+        provider: "codex_usage".into(),
+        project_id: None,
+        gcp: false,
         access_token: access_token.into(),
         account_id: Some(account_id.into()),
     })
 }
 
 fn decode_detail(root: &Path, path: &Path) -> Result<Value, ApiError> {
+    decode_provider(root, path, "codex")
+}
+pub(super) fn decode_provider(root: &Path, path: &Path, kind: &str) -> Result<Value, ApiError> {
     let bytes = read_in_root(root, path, MAX_JSON_BYTES, "IO_ERROR")?;
     let document: Value = serde_json::from_slice(&bytes)
         .map_err(|_| ApiError::new("SOURCE_BUSY", "账号详情暂时无法读取，请稍后重试"))?;
@@ -249,7 +260,7 @@ fn decode_detail(root: &Path, path: &Path) -> Result<Value, ApiError> {
         return Ok(document);
     }
     if document.get("version").and_then(Value::as_u64) != Some(1)
-        || document.get("kind").and_then(Value::as_str) != Some("codex")
+        || document.get("kind").and_then(Value::as_str) != Some(kind)
         || document.get("algorithm").and_then(Value::as_str) != Some("AES-256-GCM")
         || document.get("key_id").and_then(Value::as_str) != Some("local-secure-account-storage-v1")
     {
@@ -298,7 +309,7 @@ fn safe_source_id(id: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
-fn read_in_root(
+pub(super) fn read_in_root(
     root: &Path,
     candidate: &Path,
     limit: usize,

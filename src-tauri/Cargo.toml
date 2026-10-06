@@ -1,12 +1,12 @@
 [package]
-name = "chatgpt-hud"
-version = "0.2.3"
-description = "A read-only quota HUD for Cockpit Tools"
+name = "aide-monitor"
+version = "0.3.0"
+description = "AIDE monitor — multi-platform AI quota monitor"
 edition = "2021"
 publish = false
 
 [lib]
-name = "chatgpt_hud"
+name = "aide_monitor"
 crate-type = ["rlib"]
 
 [features]
@@ -40,3 +40,10 @@ opt-level = "s"
 lto = "thin"
 strip = true
 codegen-units = 1
+
+[dependencies.rusqlite]
+version = "0.32"
+features = ["bundled"]
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"

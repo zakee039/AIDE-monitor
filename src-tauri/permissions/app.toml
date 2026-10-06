@@ -11,4 +11,4 @@ commands.allow = ["hud_v1_refresh_request", "hud_v1_window_control", "hud_intern
 [[permission]]
 identifier = "settings-actions"
 description = "Configure the HUD through its trusted settings window"
-commands.allow = ["hud_v1_accounts_selection_update", "hud_v1_accounts_alias_update", "hud_internal_theme_export", "hud_internal_docs_open", "hud_v1_settings_update", "hud_v1_themes_validate", "hud_v1_themes_preview", "hud_v1_themes_import", "hud_v1_themes_select", "hud_v1_diagnostics_get", "hud_internal_source_get", "hud_internal_source_choose", "hud_internal_source_rescan"]
+commands.allow = ["hud_v1_accounts_selection_update", "hud_v1_accounts_alias_update", "hud_internal_theme_export", "hud_internal_docs_open", "hud_v1_settings_update", "hud_v1_themes_validate", "hud_v1_themes_preview", "hud_v1_themes_import", "hud_v1_themes_select", "hud_v1_diagnostics_get", "hud_internal_sources_get", "hud_internal_sources_save", "hud_internal_sources_pick", "hud_internal_startup", "hud_internal_source_get", "hud_internal_source_choose", "hud_internal_source_rescan"]
