@@ -428,3 +428,44 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline-color:
 .theme-manager .theme-swatch strong { max-width: 100%; overflow-wrap: anywhere; }
 .theme-manager > label { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
 .theme-manager .theme-option-info button { border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px; }
+
+/* Dense account table. Columns stay aligned while aliases save in place. */
+.selection-columns, .selection-row { display: grid; grid-template-columns: minmax(120px, 1fr) 82px minmax(100px, 160px) 52px; gap: 10px; align-items: center; }
+.selection-columns { padding: 7px 14px; color: var(--text-muted); font-size: 12px; }
+.selection-row { padding: 9px 14px; min-height: 48px; }
+.selection-row > label { width: 100%; gap: 10px; }
+.selection-identity { min-width: 0; overflow: hidden; }
+.selection-identity strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selection-row select { width: 100%; padding: 5px 4px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); color: var(--text); }
+.selection-row .alias-editor { width: 100%; margin: 0; position: relative; }
+.alias-editor > span:empty { display: none; }
+.alias-editor > span:not(:empty) { position: absolute; top: 100%; z-index: 1; background: var(--background); }
+.order-actions { display: flex; gap: 0; }
+.order-actions .icon-button { width: 26px; min-width: 26px; height: 28px; }
+.hud-shell:not(.theme-default) { border-top-color: color-mix(in srgb, var(--border) 35%, var(--background)); }
+.hud-shell.is-transitioning { visibility: hidden; }
+.position-locked [data-tauri-drag-region] { -webkit-app-region: no-drag; }
+.onion-divider { display: flex; width: 100%; height: 13px; flex-shrink: 0; overflow: hidden; margin: 1px 0; }
+.onion-divider i { height: 100%; background-repeat: no-repeat; }
+.onion-divider i:first-child { width: calc(13px * 43 / 100); flex-shrink: 0; background: url('/miku/left.png') right center / contain no-repeat; }
+.onion-divider i:nth-child(2) { flex: 1; margin: 0 -1px; background: url('/miku/middle.png') center / 100% 100% no-repeat; }
+.onion-divider i:last-child { width: calc(13px * 193 / 100); flex-shrink: 0; background: url('/miku/right.png') left center / contain no-repeat; }
+.theme-default .compact-recommendation { border-top: 0; margin: 0 0 -4px -3px; padding-top: 0; }
+.theme-default .compact-recommendation::before { content: ''; width: 32px; height: 32px; flex-shrink: 0; background: url('/miku/avatar.png') center / contain no-repeat; }
+.usb-stage { width: 100vw; height: 100vh; min-height: 0; overflow: hidden; }
+.usb-stage .hud-shell { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; border: 0; border-radius: 0; }
+.usb-stage .hud-body { justify-content: center; padding: 16px; }
+.usb-stage .compact-accounts { overflow: auto; max-width: 100%; }
+.usb-stage .compact-recommendation { flex-wrap: wrap; }
+.usb-stage .hud-controls { display: none; }
+.usb-panel .setting-row select { max-width: 65%; }
+
+.usb-stage { background: var(--background); }
+.usb-stage .hud-shell { inset: auto; left: 50%; top: 50%; width: max-content; height: auto; max-width: none; min-height: 0; overflow: visible; transform-origin: center; }
+.usb-stage .hud-body, .usb-stage .compact-accounts { overflow: visible; max-height: none; max-width: none; }
+.usb-stage .hud-actions { display: none; }
+
+.settings-sidebar .nav-button { white-space: nowrap; gap: 8px; }
+
+.usb-stage { position: relative; padding: 0; }
+.usb-stage .hud-shell { box-shadow: none; }

@@ -303,9 +303,14 @@ const SCRIPT: &str = r#"
         expectedRevision:beforeUpdate.settingsRevision,
         refreshIntervalSeconds:61,
         autoRefresh:false,
-        display:{privacyMode:true,alwaysOnTop:false}
+        display:{privacyMode:true,alwaysOnTop:false,positionLocked:true},
+        usbDisplay:{enabled:false,deviceId:"smoke-disconnected-monitor",themeId:"midnight"}
       });
       assert(updated.refreshIntervalSeconds === 61 && updated.display.privacyMode === true && updated.autoRefresh === false, 'SETTINGS_UPDATE_NOT_APPLIED');
+      assert(updated.display.positionLocked && updated.usbDisplay.deviceId === 'smoke-disconnected-monitor', 'DISPLAY_PREFERENCES_NOT_APPLIED');
+      const monitors = await window.__TAURI_INTERNALS__.invoke('aide_usb_displays');
+      assert(Array.isArray(monitors) && monitors.every(m => typeof m.id === 'string' && m.width > 0 && m.height > 0), 'MONITOR_ENUMERATION_FAILED');
+      checks.push('monitor-enumeration-and-display-preferences');
       const selected = await window.__TAURI_INTERNALS__.invoke('aide_theme_select', {id:'paper'});
       assert(selected.ok, 'THEME_SELECT_FAILED');
       const activeTheme = await call('aide_theme_builtin');

@@ -16,7 +16,7 @@ pub fn builtin(id: &str) -> Option<Value> {
         }
         "paper" => {
             theme["id"] = "paper".into();
-            theme["name"] = "晨光".into();
+            theme["name"] = "明亮".into();
             theme["tokens"]["colors"] = serde_json::json!({
                 "background":"#F8FAFC","surface":"#FFFFFF","text":"#0F172A","textMuted":"#475569","border":"#64748B","accent":"#1D4ED8","accentText":"#FFFFFF","success":"#166534","warning":"#854D0E","exhausted":"#9A3412","error":"#B91C1C","unknown":"#475569","stale":"#6B21A8"
             });

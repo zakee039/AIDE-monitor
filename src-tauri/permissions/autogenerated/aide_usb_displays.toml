@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-aide-usb-displays"
+description = "Enables the aide_usb_displays command without any pre-configured scope."
+commands.allow = ["aide_usb_displays"]
+
+[[permission]]
+identifier = "deny-aide-usb-displays"
+description = "Denies the aide_usb_displays command without any pre-configured scope."
+commands.deny = ["aide_usb_displays"]

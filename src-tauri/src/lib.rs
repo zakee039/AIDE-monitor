@@ -10,6 +10,7 @@ mod theme_package;
 mod theme_runtime;
 mod theme_smoke;
 mod themes;
+mod usb_display;
 use theme_commands::*;
 
 use model::*;
@@ -25,7 +26,7 @@ use tauri_plugin_dialog::DialogExt;
 
 fn authorize(window: &WebviewWindow, settings_only: bool) -> Result<(), ApiError> {
     if (settings_only && window.label() == "settings")
-        || (!settings_only && ["hud", "settings"].contains(&window.label()))
+        || (!settings_only && ["hud", "settings", "usb-display"].contains(&window.label()))
     {
         Ok(())
     } else {
@@ -290,7 +291,13 @@ fn aide_theme_builtin(
             .and_then(|r| {
                 themes::get(
                     &service.theme_dir,
-                    &r.id.unwrap_or_else(|| service.settings().active_theme_id),
+                    &r.id.unwrap_or_else(|| {
+                        if window.label() == "usb-display" {
+                            service.settings().usb_display.theme_id
+                        } else {
+                            service.settings().active_theme_id
+                        }
+                    }),
                 )
             }),
     )
@@ -500,6 +507,8 @@ fn toggle_pin(app: &tauri::AppHandle) {
     let before = service.settings();
     let result = service.update_settings(SettingsPatch {
         expected_revision: before.settings_revision,
+        account_refresh: None,
+        usb_display: None,
         refresh_interval_seconds: None,
         auto_refresh: None,
         display: Some(DisplaySettingsPatch {
@@ -694,7 +703,8 @@ async fn hud_internal_window_layout(
         if !request.collapsed {
             layout.expanded_width = request.width;
         }
-        if theme_package::BUILTINS.contains(&service.settings().active_theme_id.as_str())
+        if (request.collapsed
+            || theme_package::BUILTINS.contains(&service.settings().active_theme_id.as_str()))
             && !smoke::is_enabled()
         {
             let _ = window.show();
@@ -764,6 +774,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .on_page_load(smoke::on_page_load)
         .invoke_handler(tauri::generate_handler![
+            usb_display::aide_usb_displays,
             hud_v1_capabilities_get,
             hud_v1_accounts_list,
             hud_v1_accounts_selection_update,
@@ -860,6 +871,7 @@ pub fn run() {
                 (quit.clone(), "Quit", "退出"),
             ]));
             sync_window_preferences(app.handle(), &service.settings());
+            usb_display::start(app.handle());
             let separator = PredefinedMenuItem::separator(app)?;
             let menu = Menu::with_items(
                 app,
@@ -919,6 +931,30 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "usb-display" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                if let tauri::WindowEvent::Moved(_) = event {
+                    let id = window
+                        .app_handle()
+                        .state::<Service>()
+                        .settings()
+                        .usb_display
+                        .device_id;
+                    let valid = usb_display::devices(window.app_handle()).is_ok_and(|v| {
+                        v.iter().any(|d| {
+                            d.id == id
+                                && window.outer_position().ok()
+                                    == Some(tauri::PhysicalPosition::new(d.x, d.y))
+                        })
+                    });
+                    if !valid {
+                        let _ = window.hide();
+                    }
+                }
+            }
             if window.label().starts_with("aide-theme-") {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();

@@ -1,3 +1,4 @@
+import { UsbDisplayPanel } from "./UsbDisplayPanel";
 import { ThemeManager } from "./ThemeManager";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -20,6 +21,7 @@ interface AppState {
   capabilities: Capabilities | null;
 }
 
+const usbView = new URLSearchParams(location.search).get("view") === "usb";
 const initialState: AppState = { snapshot: null, accounts: [], settings: null, themes: [], theme: defaultTheme, sourcePath: null, capabilities: null };
 const availabilityReasons: Record<string, string> = { no_data: "暂无配额", stale: "数据已过期", awaiting_confirmation: "等待核实", incomplete_quota: "配额不完整", other_limit: "其他限制", unknown_reset: "重置时间未知", query_failed: "查询失败", cache_only: "仅缓存数据", clock_uncertain: "时间需核实", below_threshold: "低于推荐额度", quota_exhausted: "额度已耗尽", available: "当前可用" };
 
@@ -116,9 +118,25 @@ export default function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, commitCollapsed] = useState(false);
+  const [transitioning, setTransitioning] = useState(false);
+  const changing = useRef(false);
+  const collapsedValue = useRef(false);
+  const setCollapsed = (value: boolean | ((previous: boolean) => boolean)) => {
+    if (changing.current) return;
+    const next = typeof value === "function" ? value(collapsedValue.current) : value;
+    if (next === collapsedValue.current) return;
+    changing.current = true;
+    setTransitioning(true);
+    // Hide content before React swaps shapes; reveal only after native geometry settles.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      collapsedValue.current = next;
+      commitCollapsed(next);
+      if (!desktop) { setTransitioning(false); changing.current = false; }
+    }));
+  };
   useEffect(() => {
-    if (!desktop || settingsView) return;
+    if (!desktop || settingsView || usbView) return;
     let stop: (() => void) | undefined;
     let active = true;
     void listen("aide://toggle-collapse", () => setCollapsed(value => !value)).then(unlisten => { if (active) stop = unlisten; else unlisten(); });
@@ -128,15 +146,29 @@ export default function App() {
     window.addEventListener("dblclick", doubleClick, true);
     return () => { active = false; stop?.(); window.removeEventListener("contextmenu", context, true); window.removeEventListener("dblclick", doubleClick, true); };
   }, [settingsView]);
-  useEffect(()=>{if(!desktop||settingsView)return;let active=true;let stop:(()=>void)|undefined;void listen<boolean>('aide://set-collapse',event=>setCollapsed(event.payload)).then(fn=>{if(active)stop=fn;else fn();});return()=>{active=false;stop?.();};},[settingsView]);
-  useEffect(()=>{if(desktop&&!settingsView&&!collapsed)void invoke('aide_theme_resume').catch(()=>{});},[collapsed,settingsView]);
+  useEffect(()=>{if(!desktop||settingsView||usbView)return;let active=true;let stop:(()=>void)|undefined;void listen<boolean>('aide://set-collapse',event=>setCollapsed(event.payload)).then(fn=>{if(active)stop=fn;else fn();});return()=>{active=false;stop?.();};},[settingsView]);
+  useEffect(()=>{if(desktop&&!settingsView&&!usbView&&!collapsed)void invoke('aide_theme_resume').catch(()=>{});},[collapsed,settingsView]);
   const panelRef = useRef<HTMLDivElement>(null);
   const layoutQueue = useRef<Promise<unknown>>(Promise.resolve());
+  useEffect(() => {
+    if (!usbView || !panelRef.current) return;
+    const panel = panelRef.current;
+    const fit = () => {
+      const scale = Math.min((window.innerWidth - 24) / Math.max(1, panel.offsetWidth), (window.innerHeight - 24) / Math.max(1, panel.offsetHeight));
+      panel.style.transform = `translate(-50%, -50%) scale(${Math.max(.05, scale)})`;
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(panel);
+    window.addEventListener("resize", fit);
+    fit();
+    return () => { observer.disconnect(); window.removeEventListener("resize", fit); };
+  }, [loading, state.theme.id]);
+
 
 
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   useEffect(() => {
-    if (!desktop || settingsView) return;
+    if (!desktop || settingsView || usbView) return;
     const panel = panelRef.current;
     if (!panel) return;
     let timer: number | undefined;
@@ -156,9 +188,10 @@ export default function App() {
           });
           layoutQueue.current = scheduled;
           await scheduled;
+          if (active) { setTransitioning(false); changing.current = false; }
         }
       } catch (failure) { if (active) setActionError(errorMessage(failure)); }
-      finally { resizing = false; }
+      finally { resizing = false; if (active) { setTransitioning(false); changing.current = false; } }
     };
     const measure = () => {
       window.clearTimeout(timer);
@@ -193,16 +226,18 @@ export default function App() {
     if (desktop) void perform("settings", () => call("window.control", { action: "open_settings" }));
     else { setSettingsView(true); history.replaceState(null, "", "?view=settings"); }
   };
-  return localize(<main className={`app-stage ${desktop ? "desktop" : "browser"} ${settingsView ? "settings-stage" : "hud-stage"}`}>
+  return localize(<main style={usbView ? themeStyle(state.theme) : undefined} onMouseDownCapture={event => {
+    if (!settingsView && (state.settings?.display.positionLocked || usbView) && (event.target as HTMLElement).closest('[data-tauri-drag-region],.quota-orb')) event.stopPropagation();
+  }} className={`app-stage ${desktop ? "desktop" : "browser"} ${settingsView ? "settings-stage" : "hud-stage"} ${usbView ? "usb-stage" : ""} ${state.settings?.display.positionLocked || usbView ? "position-locked" : ""}`}>
     {settingsView ?
       <SettingsView state={state} loading={loading} error={actionError ?? readError} notice={notice} busy={busy} perform={perform} reload={reload} onBack={() => { setSettingsView(false); history.replaceState(null, "", location.pathname); }} /> :
-      <div ref={panelRef} className={`hud-shell ${collapsed ? "is-collapsed" : ""}`} style={themeStyle(state.theme)}>
-        {collapsed && state.snapshot ? <QuotaOrb snapshot={state.snapshot} now={now} onExpand={() => setCollapsed(false)} /> : loading && !state.snapshot ? <div className="hud-empty" data-tauri-drag-region>正在读取配额…</div> : state.snapshot ?
-          <HudContent snapshot={state.snapshot} theme={state.theme} now={now} onSettings={openSettings} onRefresh={() => { void perform("refresh-all", () => call("refresh.request", {})); }} onHide={() => { void perform("hide", () => call("window.control", { action: "hide" })); }} onCollapse={() => setCollapsed(true)} busy={busy} /> :
+      <div ref={panelRef} className={`hud-shell ${collapsed ? "is-collapsed" : ""} ${transitioning ? "is-transitioning" : ""} theme-${state.theme.id}`} style={themeStyle(state.theme)}>
+        {collapsed && state.snapshot ? <QuotaOrb locked={state.settings?.display.positionLocked ?? false} snapshot={state.snapshot} now={now} onExpand={() => setCollapsed(false)} /> : loading && !state.snapshot ? <div className="hud-empty" data-tauri-drag-region>正在读取配额…</div> : state.snapshot ?
+          <HudContent snapshot={state.snapshot} theme={state.theme} now={now} onSettings={usbView ? undefined : openSettings} onRefresh={usbView ? undefined : () => { void perform("refresh-all", () => call("refresh.request", {})); }} onHide={usbView ? undefined : () => { void perform("hide", () => call("window.control", { action: "hide" })); }} onCollapse={usbView ? undefined : () => setCollapsed(true)} busy={busy} /> :
           <div className="hud-empty"><button className="text-button" onClick={() => { void reload(); }}>读取失败 · 点击重试</button></div>}
         {!collapsed && (actionError ?? readError) && <div className="hud-error" role="alert">{actionError ?? readError}</div>}
       </div>}
-    {!desktop && !settingsView && <div className="browser-caption"><span>虚构数据预览 · 更多操作位于托盘右键菜单</span><button className="text-button" onClick={openSettings}>预览设置</button></div>}
+    {!desktop && !settingsView && !usbView && <div className="browser-caption"><span>虚构数据预览 · 更多操作位于托盘右键菜单</span><button className="text-button" onClick={openSettings}>预览设置</button></div>}
   </main>);
 }
 
@@ -234,6 +269,7 @@ function HudContent({ snapshot, theme, now, onSettings, onRefresh, onHide, onCol
     {snapshot.accounts.length ? <>
       <section className="compact-accounts" style={{ gridTemplateColumns: columns }} aria-label="账号配额" data-tauri-drag-region>{snapshot.accounts.map(account => <AccountRow key={account.id} account={account} quota={snapshot.quotas.find(quota => quota.accountId === account.id)} availability={snapshot.availability.find(item => item.accountId === account.id)} now={now} showCredits={hasCredits} windowColumns={windowColumns} interactive={!!onSettings} />)}</section>
     </> : <div className="hud-empty" data-tauri-drag-region><span>{snapshot.source.state === "ready" ? "尚未选择账号" : "尚未连接账号来源"}</span><span className="hud-empty-hint">右键托盘 → 设置</span></div>}
+    {theme.id === "default" && <div className="onion-divider" aria-hidden="true"><i /><i /><i /></div>}
     <RecommendationStrip snapshot={snapshot} now={now} onSettings={onSettings} onRefresh={onRefresh} onHide={onHide} onCollapse={onCollapse} busy={busy} />
     <span className="sr-only">{theme.name}</span>
   </div>);
@@ -285,7 +321,7 @@ function RecommendationStrip({ snapshot, now, onSettings, onRefresh, onHide, onC
   </div>);
 }
 
-function QuotaOrb({ snapshot, now, onExpand }: { snapshot: Snapshot; now: number; onExpand: () => void }) {
+function QuotaOrb({ snapshot, now, onExpand, locked }: { locked: boolean; snapshot: Snapshot; now: number; onExpand: () => void }) {
   const total = snapshot.totalQuota;
   const { waiting, timeLines, text } = orbDisplay(snapshot, now);
   const drag = useRef({ x: 0, y: 0, moved: false, pressed: false });
@@ -293,7 +329,7 @@ function QuotaOrb({ snapshot, now, onExpand }: { snapshot: Snapshot; now: number
     if (event.button === 0) drag.current = { x: event.clientX, y: event.clientY, moved: false, pressed: true };
   }} onPointerMove={event => {
     const origin = drag.current;
-    if (!desktop || !origin.pressed || origin.moved || !(event.buttons & 1) || Math.hypot(event.clientX - origin.x, event.clientY - origin.y) < 4) return;
+    if (locked || !desktop || !origin.pressed || origin.moved || !(event.buttons & 1) || Math.hypot(event.clientX - origin.x, event.clientY - origin.y) < 4) return;
     origin.moved = true;
     void getCurrentWindow().startDragging().catch(() => {});
   }} onPointerUp={() => { drag.current.pressed = false; }} onPointerCancel={() => { drag.current.pressed = false; }} onClick={event => {
@@ -303,7 +339,7 @@ function QuotaOrb({ snapshot, now, onExpand }: { snapshot: Snapshot; now: number
 }
 
 type Performer = (key: string, action: () => Promise<unknown>, success?: string) => Promise<void>;
-type SettingSection = "general" | "accounts" | "themes" | "about";
+type SettingSection = "general" | "accounts" | "themes" | "usb" | "about";
 
 function SettingsView({ state, loading, error, notice, busy, perform, reload, onBack }: { state: AppState; loading: boolean; error: string | null; notice: string | null; busy: string | null; perform: Performer; reload: () => Promise<void>; onBack: () => void }) {
   const [section, setSection] = useState<SettingSection>("general");
@@ -326,7 +362,7 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
   const rescan = () => { void perform("rescan", () => internal("source_rescan", {}), "账号列表已重新读取。"); };
   const changeOrder = (id: string, direction: number) => setSelection(current => { const index = current.indexOf(id); const destination = index + direction; if (index < 0 || destination < 0 || destination >= current.length) return current; const next = [...current]; [next[index], next[destination]] = [next[destination], next[index]]; return next; });
   const selectionDirty = JSON.stringify(selection) !== JSON.stringify(state.accounts.filter(account => account.selected).sort((a, b) => a.order - b.order).map(account => account.id));
-  const nav = [{ id: "general", label: "常规", icon: <SlidersHorizontal size={17} /> }, { id: "accounts", label: "账号", icon: <Database size={17} /> }, { id: "themes", label: "外观", icon: <Palette size={17} /> }, { id: "about", label: "关于", icon: <Info size={17} /> }] as const;
+  const nav = [{ id: "general", label: "常规", icon: <SlidersHorizontal size={17} /> }, { id: "accounts", label: "账号", icon: <Database size={17} /> }, { id: "themes", label: "外观", icon: <Palette size={17} /> }, { id: "usb", label: "USB 屏幕", icon: <Layers3 size={17} /> }, { id: "about", label: "关于", icon: <Info size={17} /> }] as const;
 
   return localize(<div className="settings-shell" style={themeStyle(defaultTheme)}>
     {sourcesOpen && <SourceDialog error={error} sources={sources} setSources={setSources} busy={busy} onClose={() => setSourcesOpen(false)} onPick={pickSource} onSave={() => { void perform("sources-save", async () => { await internal("sources_save", { sources }); setSourcesOpen(false); }, "数据源已保存并扫描。"); }} />}
@@ -340,14 +376,19 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
         <SettingsCard title="语言" icon={<Settings2 size={17} />}><div className="setting-row"><div><strong>界面语言</strong></div><select aria-label="界面语言" value={settings?.display.locale === "zh-CN" ? "zh-CN" : "en"} disabled={busy !== null || !settings} onChange={event => patch("language", { display: { locale: event.target.value as "en" | "zh-CN" } })}><option value="en">English</option><option value="zh-CN">简体中文</option></select></div></SettingsCard>
         <SettingsCard title="数据源" icon={<Database size={17} />} action={<button className="secondary-button" disabled={busy !== null} onClick={openSources}>选择源</button>}>{state.snapshot?.source.error && <p className="source-error" role="alert">{t("数据源暂不可用")} ({state.snapshot.source.error.code})</p>}</SettingsCard>
         <SettingsCard title="配额刷新" icon={<RefreshCw size={17} />}><ToggleRow title="自动刷新" detail="定期获取所选账号的最新配额" checked={settings?.autoRefresh ?? false} disabled={busy !== null || !settings} onChange={checked => patch("auto-refresh", { autoRefresh: checked })} /><div className="setting-row"><div><strong>刷新间隔</strong></div><select aria-label="刷新间隔" value={interval} disabled={busy !== null || !settings} onChange={event => { setIntervalValue(event.target.value); patch("interval", { refreshIntervalSeconds: Number(event.target.value) }); }}><option value="60">1 分钟</option><option value="300">5 分钟</option><option value="600">10 分钟</option><option value="900">15 分钟</option><option value="1800">30 分钟</option>{![60, 300, 600, 900, 1800].includes(settings?.refreshIntervalSeconds ?? 300) && <option value={settings?.refreshIntervalSeconds}>{settings?.refreshIntervalSeconds} 秒</option>}</select></div></SettingsCard>
-        <SettingsCard title="窗口与显示" icon={<Settings2 size={17} />}><ToggleRow title="开机自启" detail="" checked={startup ?? false} disabled={busy !== null || startup === null} onChange={enabled => { void perform("startup", async () => { setStartup((await internal("startup", { enabled })).enabled); }); }} /><ToggleRow title="始终置顶" detail="让 HUD 保持在其他窗口上方" checked={settings?.display.alwaysOnTop ?? true} disabled={busy !== null || !settings} onChange={checked => patch("pin", { display: { alwaysOnTop: checked } })} /><ToggleRow title="隐私模式" detail="用“账号 1”等名称遮罩账号显示" checked={settings?.display.privacyMode ?? false} disabled={busy !== null || !settings} onChange={checked => patch("privacy", { display: { privacyMode: checked } })} /></SettingsCard>
+        <SettingsCard title="窗口与显示" icon={<Settings2 size={17} />}><ToggleRow title="开机自启" detail="" checked={startup ?? false} disabled={busy !== null || startup === null} onChange={enabled => { void perform("startup", async () => { setStartup((await internal("startup", { enabled })).enabled); }); }} /><ToggleRow title="始终置顶" detail="让 HUD 保持在其他窗口上方" checked={settings?.display.alwaysOnTop ?? true} disabled={busy !== null || !settings} onChange={checked => patch("pin", { display: { alwaysOnTop: checked } })} /><ToggleRow title="锁定位置" detail="" checked={settings?.display.positionLocked ?? false} disabled={busy !== null || !settings} onChange={checked => patch("position-lock", { display: { positionLocked: checked } })} /><ToggleRow title="隐私模式" detail="用“账号 1”等名称遮罩账号显示" checked={settings?.display.privacyMode ?? false} disabled={busy !== null || !settings} onChange={checked => patch("privacy", { display: { privacyMode: checked } })} /></SettingsCard>
       </>}
       {section === "accounts" && <><SectionHeading eyebrow="YOUR ACCOUNTS" title="账号" description="勾选要显示的账号，并调整 HUD 中的顺序。" />
         <div className="account-selection-header"><span>{selection.length} 个已选择 / {state.accounts.length} 个账号</span><button className="text-button" disabled={busy !== null} onClick={rescan}><RefreshCw size={14} className={busy === "rescan" ? "spin" : ""} />重新扫描</button></div>
-        <div className="selection-list">{state.accounts.length ? [...state.accounts].sort((a, b) => { const ai = selection.indexOf(a.id); const bi = selection.indexOf(b.id); return (ai < 0 ? 1000 + a.order : ai) - (bi < 0 ? 1000 + b.order : bi); }).map(account => <div className={`selection-row ${selection.includes(account.id) ? "chosen" : ""}`} key={account.id}><label><input type="checkbox" checked={selection.includes(account.id)} disabled={busy !== null || account.support === "unsupported"} onChange={event => setSelection(current => event.target.checked ? [...current, account.id] : current.filter(id => id !== account.id))} /><span className="selection-check"><Check size={12} /></span><ProviderIcon provider={account.providerId} /><span className="selection-identity"><strong translate="no">{account.displayName}</strong><span>{["codex", "codex_usage"].includes(account.providerId) ? "Codex" : account.providerId} · {account.support === "unsupported" ? "暂不支持" : account.support === "unknown" ? "支持情况待核实" : account.isCurrent ? "当前本机登录" : "已发现"}</span></span></label><AliasInput account={account} reload={reload} />{<div className={`order-actions ${selection.includes(account.id) ? "" : "order-placeholder"}`}><button className="icon-button" aria-label={`上移 ${account.displayName}`} disabled={busy !== null || selection.indexOf(account.id) === 0} onClick={() => changeOrder(account.id, -1)}><ArrowUp size={14} /></button><button className="icon-button" aria-label={`下移 ${account.displayName}`} disabled={busy !== null || selection.indexOf(account.id) === selection.length - 1} onClick={() => changeOrder(account.id, 1)}><ArrowDown size={14} /></button></div>}</div>) : <div className="empty-state"><Database size={24} /><strong>尚未发现账号</strong><span>选择含 auth.json 或 codex_accounts.json 的目录，再重新扫描。</span><button className="secondary-button" disabled={busy !== null} onClick={chooseSource}>选择数据目录</button></div>}</div>
+        <div className="selection-columns"><span>账号</span><span>自动刷新</span><span>显示名称</span><span>排序</span></div><div className="selection-list">{state.accounts.length ? [...state.accounts].sort((a, b) => { const ai = selection.indexOf(a.id); const bi = selection.indexOf(b.id); return (ai < 0 ? 1000 + a.order : ai) - (bi < 0 ? 1000 + b.order : bi); }).map(account => <div className={`selection-row ${selection.includes(account.id) ? "chosen" : ""}`} key={account.id}><label><input type="checkbox" checked={selection.includes(account.id)} disabled={busy !== null || account.support === "unsupported"} onChange={event => setSelection(current => event.target.checked ? [...current, account.id] : current.filter(id => id !== account.id))} /><span className="selection-check"><Check size={12} /></span><ProviderIcon provider={account.providerId} /><span className="selection-identity"><strong translate="no">{account.displayName}</strong></span></label><select aria-label={`自动刷新 ${account.displayName}`} value={settings?.accountRefresh?.[account.id] ?? ""} disabled={busy !== null || !settings} onChange={event => {
+          const overrides = { ...settings?.accountRefresh };
+          if (event.target.value === "") delete overrides[account.id]; else overrides[account.id] = Number(event.target.value);
+          patch("account-refresh", { accountRefresh: overrides });
+        }}><option value="">-</option><option value="0">禁止</option><option value="60">1min</option><option value="300">5min</option><option value="900">15min</option><option value="3600">1h</option></select><AliasInput account={account} reload={reload} />{<div className={`order-actions ${selection.includes(account.id) ? "" : "order-placeholder"}`}><button className="icon-button" aria-label={`上移 ${account.displayName}`} disabled={busy !== null || selection.indexOf(account.id) === 0} onClick={() => changeOrder(account.id, -1)}><ArrowUp size={14} /></button><button className="icon-button" aria-label={`下移 ${account.displayName}`} disabled={busy !== null || selection.indexOf(account.id) === selection.length - 1} onClick={() => changeOrder(account.id, 1)}><ArrowDown size={14} /></button></div>}</div>) : <div className="empty-state"><Database size={24} /><strong>尚未发现账号</strong><span>选择含 auth.json 或 codex_accounts.json 的目录，再重新扫描。</span><button className="secondary-button" disabled={busy !== null} onClick={chooseSource}>选择数据目录</button></div>}</div>
         <div className="form-actions"><span>最多显示 {state.capabilities?.maxRefreshAccounts ?? 100} 个账号</span><button className="primary-button" disabled={busy !== null || !settings || !selectionDirty || selection.length > (state.capabilities?.maxRefreshAccounts ?? 100)} onClick={() => { if (settings) void perform("selection", () => call("accounts.selection.update", { expectedRevision: settings.settingsRevision, accountIds: selection }), "账号选择已保存。"); }}>{busy === "selection" ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}保存选择</button></div>
       </>}
       {section === "themes" && <ThemeManager onChanged={reload} />}
+      {section === "usb" && settings && <UsbDisplayPanel settings={settings} busy={busy !== null} onChange={usbDisplay => patch("usb", { usbDisplay })} />}
       {section === "about" && <><SectionHeading eyebrow="SMALL FOOTPRINT" title="专注配额，轻量常驻。" description="Tauri 2 + Rust · 开放接口 · 可自行扩展主题" /><SettingsCard title="AIDE monitor" description={state.capabilities?.appVersion ?? "—"} icon={<Layers3 size={18} />}><p className="about-description">读取官方客户端或 Cockpit Tools 登录账号，展示配额与重置时间。认证失效请在原客户端重新登录。</p><div className="about-status"><span className="status-dot" />{desktop ? "正在桌面应用中运行" : "浏览器演示，全部数据均为虚构"}</div></SettingsCard><SettingsCard title="开放能力" description="以当前应用实际提供的方法为准" icon={<SlidersHorizontal size={17} />} action={<button className="text-button" onClick={() => { if (desktop) void perform("docs", () => internal("docs_open", {})); else window.open("/api.html", "_blank", "noopener,noreferrer"); }}>接口说明 <ChevronRight size={14} /></button>}><div className="capability-summary"><div><strong>{state.capabilities?.enabledMethods.length ?? 0}</strong><span>可用方法</span></div><div><strong>{state.capabilities?.apiVersion ?? "—"}</strong><span>接口版本</span></div><div><strong>{state.capabilities?.themeSchemaVersions.join(", ") ?? "—"}</strong><span>主题版本</span></div></div><div className="card-bottom"><span>第一版通过应用内部接口调用。</span><button className="text-button" disabled={busy !== null || !state.capabilities?.enabledMethods.includes("diagnostics.get")} onClick={() => { void perform("diagnostics", async () => { const response = await call("diagnostics.get", {}); setDiagnostics(response.data); }); }}>检查状态 <ChevronRight size={14} /></button></div>{diagnostics && <div className="diagnostics-summary"><div><span>适配器版本</span><span>{diagnostics.adapterVersion}</span></div><div><span>所选账号 / 进行中的刷新</span><span>{diagnostics.selectedAccountCount} / {diagnostics.activeJobCount}</span></div><div><span>最近错误</span><span>{diagnostics.recentErrorCodes.length ? diagnostics.recentErrorCodes.join("、") : "暂无"}</span></div></div>}</SettingsCard><button className="text-button" disabled={busy !== null} onClick={() => { void perform("position", () => call("window.control", { action: "restore_position" }), "窗口位置已恢复。"); }}>恢复悬浮窗位置</button></>}
       </>}
       <div className="settings-content-footer"><ShieldCheck size={12} /><span>读取凭据与配额均由本机后台处理</span><button className="text-button" onClick={() => { void reload(); }} disabled={busy !== null}>同步状态</button></div>
@@ -387,7 +428,7 @@ function AliasInput({ account, reload }: { account: AccountSummary; reload: () =
     }
   };
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; window.clearTimeout(timer.current); void flush(); }; }, []);
-  return localize(<div className="alias-editor"><input aria-label={`显示名称 ${account.displayName}`} maxLength={80} value={value} placeholder={account.displayName} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; void flush(); }} onChange={event => { draft.current = event.target.value; setValue(draft.current); window.clearTimeout(timer.current); timer.current = window.setTimeout(() => { void flush(); }, 600); }} onBlur={() => { void flush(); }} onKeyDown={event => { if (event.key === "Enter") void flush(); }} /><span>{error ? <span className="field-error" role="alert">{error}</span> : saving ? "正在保存…" : "显示名称"}</span></div>);
+  return localize(<div className="alias-editor"><input aria-label={`显示名称 ${account.displayName}`} maxLength={80} value={value} placeholder={account.displayName} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; void flush(); }} onChange={event => { draft.current = event.target.value; setValue(draft.current); window.clearTimeout(timer.current); timer.current = window.setTimeout(() => { void flush(); }, 600); }} onBlur={() => { void flush(); }} onKeyDown={event => { if (event.key === "Enter") void flush(); }} /><span>{error ? <span className="field-error" role="alert">{error}</span> : saving ? "正在保存…" : null}</span></div>);
 }
 
 function SectionHeading({ title }: { eyebrow: string; title: string; description: string }) { return localize(<div className="section-heading"><h1>{title}</h1></div>); }

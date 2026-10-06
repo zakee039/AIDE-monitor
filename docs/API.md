@@ -7,3 +7,12 @@
 没有公开 HTTP/SSE 服务器、远程调用令牌或网页访问入口。只读取用户选中的账号快照，不暴露 token、完整邮箱、凭据内容、任意本地路径或原始上游响应。隐私模式同样作用于主题数据。
 
 旧 JSON 主题的 validate/preview/import/select/export 命令已删除。主题不能管理数据源、修改账号选择、安装其他主题或执行本地命令。
+
+
+### 账号刷新与独立屏幕
+
+`Settings.accountRefresh` 为账号 ID 到秒数的映射，完整替换写入。省略账号表示继承全局；`0` 禁止自动刷新；允许 `60 / 300 / 900 / 3600`。手动刷新不受此开关限制。自动刷新、重置核实和时钟变动后的自动查询均遵循覆盖设置。
+
+`Settings.display.positionLocked` 控制悬浮窗及主题窗口的拖动。
+
+`Settings.usbDisplay` 为 `{ enabled, deviceId, themeId }`，整体写入；主题限三套内置主题。`deviceId` 为 Windows 监视器接口路径，不使用易变的显示器编号。配置修改继续要求 `expectedRevision`。设置窗口可通过 `aide_usb_displays` 获取当前连接屏幕；USB 窗口只获读取权限。

@@ -85,15 +85,35 @@ pub fn toggle(app: &tauri::AppHandle) -> bool {
         if folded {
             let _ = w.hide();
             set_hidden(app, true);
-            if let Ok(position) = w.outer_position() {
-                let _ = hud.set_position(position);
+            // Prepare the hidden orb at the theme's right edge. The trusted HUD
+            // reveals it only after its React content and native layout agree.
+            let _ = hud.hide();
+            if let (Ok(position), Ok(size), Ok(scale)) =
+                (w.outer_position(), w.inner_size(), hud.scale_factor())
+            {
+                if let Ok(mut layout) = app.state::<crate::HudLayoutState>().0.lock() {
+                    layout.collapsed = true;
+                    layout.expanded_width = size.width as f64 / scale;
+                }
+                let _ = hud.set_size(tauri::LogicalSize::new(
+                    crate::HUD_ORB_SIZE,
+                    crate::HUD_ORB_SIZE,
+                ));
+                let _ = hud.set_position(tauri::PhysicalPosition::new(
+                    position.x + size.width as i32 - (crate::HUD_ORB_SIZE * scale).round() as i32,
+                    position.y,
+                ));
             }
-            let _ = hud.show();
         } else {
             let _ = hud.hide();
             set_hidden(app, false);
-            if let Ok(position) = hud.outer_position() {
-                let _ = w.set_position(position);
+            if let (Ok(position), Ok(orb), Ok(expanded)) =
+                (hud.outer_position(), hud.inner_size(), w.inner_size())
+            {
+                let _ = w.set_position(tauri::PhysicalPosition::new(
+                    position.x + orb.width as i32 - expanded.width as i32,
+                    position.y,
+                ));
             }
             let _ = w.show();
         }
@@ -536,6 +556,9 @@ fn dispatch(
             resize(&window, w, h)
         }
         "window.drag" => {
+            if app.state::<Service>().settings().display.position_locked {
+                return Err(ApiError::new("FORBIDDEN", "窗口位置已锁定"));
+            }
             fields(&params, &[])?;
             #[cfg(windows)]
             {

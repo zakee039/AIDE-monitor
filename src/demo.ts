@@ -7,7 +7,7 @@ let sequence = 0;
 const listeners = new Set<(event: HudEvent) => void>();
 const source: SourceStatus = { state: "ready", format: "plaintext", adapterVersion: "演示", error: null };
 const themes = new Map<string, ThemeDocument>([defaultTheme, midnightTheme, paperTheme].map(theme => [theme.id, theme]));
-let settings: Settings = { settingsRevision: 1, refreshIntervalSeconds: 300, autoRefresh: true, display: { alwaysOnTop: true, showHoverDetails: false, privacyMode: false, locale: "en" }, activeThemeId: "default" };
+let settings: Settings = { settingsRevision: 1, accountRefresh: {}, usbDisplay: { enabled: false, deviceId: "", themeId: "default" }, refreshIntervalSeconds: 300, autoRefresh: true, display: { positionLocked: false, alwaysOnTop: true, showHoverDetails: false, privacyMode: false, locale: "en" }, activeThemeId: "default" };
 let accounts: AccountSummary[] = [
   { id: "demo-atlas", displayName: "atlas", providerId: "codex", selected: true, order: 0, support: "supported" },
   { id: "demo-studio", displayName: "studio", providerId: "codex", selected: true, order: 1, support: "supported" },
@@ -143,13 +143,13 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
   let response: ApiResult<unknown>;
   if (["settings.update", "accounts.selection.update"].includes(method) && request.expectedRevision !== settings.settingsRevision) return fail("CONFLICT", "设置已更新，请重试。") as ApiResult<MethodMap[M]["result"]>;
   switch (method) {
-    case "capabilities.get": response = result({ appVersion: "0.4.0", apiVersion: "1.0", transport: "tauri", enabledMethods: methods, grantedScopes: ["quota.read", "quota.refresh", "events.read", "settings.read", "settings.write", "themes.read", "themes.write", "window.control", "diagnostics.read"], themeSchemaVersions: [1], providerIds: ["codex"], maxRefreshAccounts: 100 }); break;
+    case "capabilities.get": response = result({ appVersion: "0.5.0", apiVersion: "1.0", transport: "tauri", enabledMethods: methods, grantedScopes: ["quota.read", "quota.refresh", "events.read", "settings.read", "settings.write", "themes.read", "themes.write", "window.control", "diagnostics.read"], themeSchemaVersions: [1], providerIds: ["codex"], maxRefreshAccounts: 100 }); break;
     case "accounts.list": response = result(accounts.map((account, index) => ({ ...account, displayName: settings.display.privacyMode ? `${settings.display.locale === "zh-CN" ? "账号" : "Account"} ${index + 1}` : account.displayName }))); break;
     case "quota.snapshot.get": response = result(demoSnapshot()); break;
     case "recommendation.get": response = result(demoSnapshot().recommendation); break;
     case "settings.get": response = result(settings); break;
     case "settings.update": {
-      settings = { ...settings, ...(typeof request.autoRefresh === "boolean" ? { autoRefresh: request.autoRefresh } : {}), ...(typeof request.refreshIntervalSeconds === "number" ? { refreshIntervalSeconds: request.refreshIntervalSeconds } : {}), display: { ...settings.display, ...(request.display as object ?? {}) }, settingsRevision: settings.settingsRevision + 1 };
+      settings = { ...settings, ...(request.accountRefresh ? { accountRefresh: request.accountRefresh as Record<string, number> } : {}), ...(request.usbDisplay ? { usbDisplay: request.usbDisplay as Settings["usbDisplay"] } : {}), ...(typeof request.autoRefresh === "boolean" ? { autoRefresh: request.autoRefresh } : {}), ...(typeof request.refreshIntervalSeconds === "number" ? { refreshIntervalSeconds: request.refreshIntervalSeconds } : {}), display: { ...settings.display, ...(request.display as object ?? {}) }, settingsRevision: settings.settingsRevision + 1 };
       emit("settings.changed"); response = result(settings); break;
     }
     case "accounts.selection.update": {
@@ -185,7 +185,7 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
       settings.settingsRevision++; emit("snapshot.changed"); response = result(settings); break;
     }
     case "window.control": response = result({ accepted: true }); break;
-    case "diagnostics.get": response = result({ appVersion: "0.4.0", adapterVersion: "演示", source, selectedAccountCount: accounts.filter(account => account.selected).length, activeJobCount: refreshing ? 1 : 0, recentErrorCodes: [] }); break;
+    case "diagnostics.get": response = result({ appVersion: "0.5.0", adapterVersion: "演示", source, selectedAccountCount: accounts.filter(account => account.selected).length, activeJobCount: refreshing ? 1 : 0, recentErrorCodes: [] }); break;
     default: response = fail("INVALID_ARGUMENT", "此功能尚未提供。");
   }
   return response as ApiResult<MethodMap[M]["result"]>;
@@ -197,7 +197,7 @@ export async function demoInternal(method: string, request: object): Promise<Api
   switch (method) {
     case "startup": { const v = (request as { enabled?: boolean }).enabled; if (v !== undefined) demoStartup = v; return result({ enabled: demoStartup }); }
     case "sources_get": return result(demoSources);
-    case "sources_save": demoSources = (request as { sources: typeof demoSources }).sources; return result({ state: "ready", format: "unknown", adapterVersion: "0.4.0", error: null });
+    case "sources_save": demoSources = (request as { sources: typeof demoSources }).sources; return result({ state: "ready", format: "unknown", adapterVersion: "0.5.0", error: null });
     case "sources_pick": return result({ path: "C:/Demo/Accounts" });
     case "source_get": return result({ path: "浏览器演示 · 虚构账号" });
     case "source_choose": emit("source.changed"); return result({ cancelled: false, path: "浏览器演示 · 虚构账号", source });

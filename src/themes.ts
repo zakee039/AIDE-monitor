@@ -28,7 +28,7 @@ export const defaultTheme = cream as ThemeDocument;
 export const midnightTheme = midnight as ThemeDocument;
 
 export const paperTheme: ThemeDocument = {
-  ...defaultTheme, id: "paper", name: "纸白",
+  ...defaultTheme, id: "paper", name: "明亮",
   tokens: { ...defaultTheme.tokens, colors: { background: "#F7F8FA", surface: "#FFFFFF", text: "#182334", textMuted: "#4B596E", border: "#778396", accent: "#285AB3", accentText: "#FFFFFF", success: "#246844", warning: "#795419", exhausted: "#914512", error: "#A92D44", unknown: "#4B596E", stale: "#74508F" } },
 };
 

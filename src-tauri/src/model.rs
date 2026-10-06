@@ -255,6 +255,8 @@ pub struct RefreshJob {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DisplaySettings {
+    #[serde(default)]
+    pub position_locked: bool,
     pub always_on_top: bool,
     pub show_hover_details: bool,
     pub privacy_mode: bool,
@@ -264,6 +266,7 @@ pub struct DisplaySettings {
 impl Default for DisplaySettings {
     fn default() -> Self {
         Self {
+            position_locked: false,
             always_on_top: true,
             show_hover_details: false,
             privacy_mode: false,
@@ -275,6 +278,10 @@ impl Default for DisplaySettings {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
+    #[serde(default)]
+    pub account_refresh: BTreeMap<String, u64>,
+    #[serde(default)]
+    pub usb_display: UsbDisplaySettings,
     pub settings_revision: u64,
     pub refresh_interval_seconds: u64,
     pub auto_refresh: bool,
@@ -285,6 +292,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            account_refresh: BTreeMap::new(),
+            usb_display: UsbDisplaySettings::default(),
             settings_revision: 0,
             refresh_interval_seconds: 300,
             auto_refresh: true,
@@ -297,6 +306,7 @@ impl Default for Settings {
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DisplaySettingsPatch {
+    pub position_locked: Option<bool>,
     pub always_on_top: Option<bool>,
     pub show_hover_details: Option<bool>,
     pub privacy_mode: Option<bool>,
@@ -306,6 +316,8 @@ pub struct DisplaySettingsPatch {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SettingsPatch {
+    pub account_refresh: Option<BTreeMap<String, u64>>,
+    pub usb_display: Option<UsbDisplaySettings>,
     pub expected_revision: u64,
     pub refresh_interval_seconds: Option<u64>,
     pub auto_refresh: Option<bool>,
@@ -370,4 +382,31 @@ pub struct HudEvent {
     #[serde(rename = "type")]
     pub event_type: String,
     pub data: EventData,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct UsbDisplaySettings {
+    pub enabled: bool,
+    pub device_id: String,
+    pub theme_id: String,
+}
+impl Default for UsbDisplaySettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            device_id: String::new(),
+            theme_id: "default".into(),
+        }
+    }
+}
+impl Settings {
+    pub fn account_interval(&self, id: &str) -> Option<u64> {
+        match self.account_refresh.get(id) {
+            Some(0) => None,
+            Some(seconds) => Some(*seconds),
+            None if self.auto_refresh => Some(self.refresh_interval_seconds),
+            None => None,
+        }
+    }
 }

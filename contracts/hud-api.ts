@@ -123,12 +123,16 @@ export interface RefreshJob {
 }
 
 export interface DisplaySettings {
+  positionLocked: boolean;
   alwaysOnTop: boolean;
   showHoverDetails: boolean;
   privacyMode: boolean;
   locale: "system" | "zh-CN" | "en";
 }
+export interface UsbDisplaySettings { enabled: boolean; deviceId: string; themeId: string }
 export interface Settings {
+  accountRefresh: Record<string, number>;
+  usbDisplay: UsbDisplaySettings;
   settingsRevision: number;
   refreshIntervalSeconds: number;
   autoRefresh: boolean;
@@ -136,6 +140,8 @@ export interface Settings {
   activeThemeId: string;
 }
 export interface SettingsPatch {
+  accountRefresh?: Record<string, number>;
+  usbDisplay?: UsbDisplaySettings;
   expectedRevision: number;
   refreshIntervalSeconds?: number;
   autoRefresh?: boolean;

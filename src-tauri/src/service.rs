@@ -36,6 +36,7 @@ struct Data {
     revision: u64,
     sequence: u64,
     next_auto: Instant,
+    refresh_started: HashMap<String, Instant>,
     handled_resets: HashSet<String>,
     samples: HashMap<String, Instant>,
     clock_pending: HashSet<String>,
@@ -93,6 +94,7 @@ impl Service {
                 revision: 0,
                 sequence: 0,
                 next_auto,
+                refresh_started: HashMap::new(),
                 handled_resets: HashSet::new(),
                 samples: HashMap::new(),
                 clock_pending: HashSet::new(),
@@ -146,6 +148,7 @@ impl Service {
         if let Some(app) = &self.app {
             let _ = app.emit_to("hud", "hud://v1/event", &event);
             let _ = app.emit_to("settings", "hud://v1/event", &event);
+            let _ = app.emit_to("usb-display", "hud://v1/event", &event);
         }
     }
     pub fn settings(&self) -> Settings {
@@ -487,6 +490,11 @@ impl Service {
         let quotas = accounts
             .iter()
             .map(|a| {
+                let interval = d
+                    .config
+                    .settings
+                    .account_interval(&a.id)
+                    .unwrap_or(interval);
                 let elapsed = d.samples.get(&a.id).map(Instant::elapsed);
                 let pending = d.clock_pending.contains(&a.id);
                 let quota = d
@@ -527,17 +535,30 @@ impl Service {
             availability,
             recommendation,
             total_quota,
-            next_refresh_at: if d.config.settings.auto_refresh {
-                Some(
+            next_refresh_at: d
+                .config
+                .selected_ids
+                .iter()
+                .filter_map(|id| {
+                    let interval = d.config.settings.account_interval(id)?;
+                    let next = if d.config.settings.account_refresh.contains_key(id) {
+                        d.refresh_started
+                            .get(id)
+                            .map(|at| *at + Duration::from_secs(interval))
+                            .unwrap_or_else(Instant::now)
+                    } else {
+                        d.next_auto
+                    };
+                    Some(next)
+                })
+                .min()
+                .map(|next| {
                     (now + chrono::Duration::from_std(
-                        d.next_auto.saturating_duration_since(Instant::now()),
+                        next.saturating_duration_since(Instant::now()),
                     )
                     .unwrap_or_default())
-                    .to_rfc3339(),
-                )
-            } else {
-                None
-            },
+                    .to_rfc3339()
+                }),
         }
     }
     /// Authoritative data and its revision are captured under the same state lock.
@@ -702,6 +723,23 @@ impl Service {
             return Err(ApiError::new("CONFLICT", "设置已更新，请重新读取后再保存"));
         }
         let mut config = d.config.clone();
+        if let Some(overrides) = patch.account_refresh {
+            if overrides.iter().any(|(id, v)| {
+                ![0, 60, 300, 900, 3600].contains(v)
+                    || !d.accounts.iter().any(|a| a.summary.id == *id)
+            }) {
+                return Err(ApiError::new("INVALID_ARGUMENT", "账号刷新设置无效"));
+            }
+            config.settings.account_refresh = overrides;
+        }
+        if let Some(usb) = patch.usb_display {
+            if crate::themes::builtin(&usb.theme_id).is_none()
+                || (usb.enabled && usb.device_id.is_empty())
+            {
+                return Err(ApiError::new("INVALID_ARGUMENT", "请选择屏幕和内置主题"));
+            }
+            config.settings.usb_display = usb;
+        }
         if let Some(interval) = patch.refresh_interval_seconds {
             if !(60..=1800).contains(&interval) {
                 return Err(ApiError::new("INVALID_ARGUMENT", "刷新间隔须为 1–30 分钟"));
@@ -712,6 +750,9 @@ impl Service {
             config.settings.auto_refresh = enabled;
         }
         if let Some(display) = patch.display {
+            if let Some(v) = display.position_locked {
+                config.settings.display.position_locked = v;
+            }
             if let Some(v) = display.always_on_top {
                 config.settings.display.always_on_top = v
             }
@@ -876,6 +917,7 @@ impl Service {
             })
             .collect::<Vec<_>>();
         for id in eligible {
+            d.refresh_started.insert(id.clone(), Instant::now());
             d.in_flight.insert(id.clone(), job_id.clone());
             d.cooldown
                 .insert(id.clone(), now + chrono::Duration::seconds(15));
@@ -1008,7 +1050,11 @@ impl Service {
         let error = result.as_ref().err().cloned();
         match result {
             Ok(mut quota) => {
-                let interval = d.config.settings.refresh_interval_seconds;
+                let interval = d
+                    .config
+                    .settings
+                    .account_interval(&id)
+                    .unwrap_or(d.config.settings.refresh_interval_seconds);
                 domain::update_freshness(&mut quota, now, interval);
                 let past_reset = quota.windows.iter().any(|w| {
                     w.scope == "base"
@@ -1115,7 +1161,11 @@ impl Service {
         let mut changed = false;
         let mut due = vec![];
         let mut reset_keys = vec![];
-        let rescan_due = d.config.settings.auto_refresh
+        let rescan_due = d
+            .config
+            .selected_ids
+            .iter()
+            .any(|id| d.config.settings.account_interval(id).is_some())
             && d.source.state != "ready"
             && (d.config.source_path.is_some() || d.config.sources.iter().any(|s| s.enabled))
             && Instant::now() >= d.next_source_scan;
@@ -1131,7 +1181,9 @@ impl Service {
         }
         d.last_tick = Instant::now();
         d.last_wall = now;
+        let refresh_settings = d.config.settings.clone();
         for (id, quota) in &mut d.quotas {
+            let interval = refresh_settings.account_interval(id).unwrap_or(interval);
             let old = quota.freshness.clone();
             domain::update_freshness(quota, now, interval);
             changed |= old != quota.freshness;
@@ -1147,7 +1199,29 @@ impl Service {
         }
         if d.config.settings.auto_refresh && Instant::now() >= d.next_auto {
             d.next_auto = Instant::now() + Duration::from_secs(interval);
-            due = d.config.selected_ids.clone();
+            due = d
+                .config
+                .selected_ids
+                .iter()
+                .filter(|id| !d.config.settings.account_refresh.contains_key(*id))
+                .cloned()
+                .collect();
+        }
+        for id in &d.config.selected_ids {
+            if let Some(seconds) = d
+                .config
+                .settings
+                .account_refresh
+                .get(id)
+                .filter(|s| **s > 0)
+            {
+                if d.refresh_started
+                    .get(id)
+                    .is_none_or(|at| at.elapsed() >= Duration::from_secs(*seconds))
+                {
+                    due.push(id.clone());
+                }
+            }
         }
         for (id, key) in reset_keys {
             if d.handled_resets.insert(key) {
@@ -1156,13 +1230,14 @@ impl Service {
             due.push(id);
         }
         due.extend(d.clock_pending.iter().cloned());
-        if !d.config.settings.auto_refresh || d.source.state != "ready" {
+        if d.source.state != "ready" {
             due.clear();
         }
         due.sort();
         due.dedup();
         due.retain(|id| {
-            !d.in_flight.contains_key(id)
+            d.config.settings.account_interval(id).is_some()
+                && !d.in_flight.contains_key(id)
                 && d.cooldown.get(id).is_none_or(|t| *t <= now)
                 && d.config.selected_ids.contains(id)
         });
@@ -1190,11 +1265,12 @@ impl Service {
         tauri::async_runtime::spawn(async move {
             let ids = {
                 let d = service.data.lock().expect("service state");
-                if d.config.settings.auto_refresh {
-                    d.config.selected_ids.clone()
-                } else {
-                    vec![]
-                }
+                d.config
+                    .selected_ids
+                    .iter()
+                    .filter(|id| d.config.settings.account_interval(id).is_some())
+                    .cloned()
+                    .collect::<Vec<_>>()
             };
             if !ids.is_empty() {
                 let _ = service.refresh(RefreshRequest {
@@ -1355,6 +1431,8 @@ mod tests {
         let service = Service::new(dir.path().into(), None).unwrap();
         let patch = SettingsPatch {
             expected_revision: 99,
+            account_refresh: None,
+            usb_display: None,
             refresh_interval_seconds: Some(60),
             auto_refresh: None,
             display: None,
@@ -1685,5 +1763,89 @@ mod tests {
             );
         }
         thread.join().unwrap();
+    }
+    #[tokio::test]
+    async fn account_override_enables_global_off_and_respects_own_interval() {
+        let (_dir, service, id) = synthetic_service();
+        let permits = service
+            .semaphore
+            .clone()
+            .acquire_many_owned(2)
+            .await
+            .unwrap();
+        {
+            let mut d = service.data.lock().unwrap();
+            d.config.settings.account_refresh.insert(id.clone(), 3600);
+            d.refresh_started
+                .insert(id.clone(), Instant::now() - Duration::from_secs(3599));
+            assert!(!d.config.settings.auto_refresh);
+        }
+        service.tick();
+        assert!(service.data.lock().unwrap().jobs.is_empty());
+        {
+            let mut d = service.data.lock().unwrap();
+            d.refresh_started
+                .insert(id.clone(), Instant::now() - Duration::from_secs(3601));
+        }
+        assert!(service.snapshot().next_refresh_at.is_some());
+        service.tick();
+        let mut d = service.data.lock().unwrap();
+        assert!(d.in_flight.contains_key(&id));
+        Service::invalidate(&mut d);
+        drop(d);
+        drop(permits);
+    }
+
+    #[tokio::test]
+    async fn account_off_blocks_periodic_reset_and_clock_refresh_but_not_manual() {
+        let (_dir, service, id) = synthetic_service();
+        let permits = service
+            .semaphore
+            .clone()
+            .acquire_many_owned(2)
+            .await
+            .unwrap();
+        {
+            let mut d = service.data.lock().unwrap();
+            d.config.settings.auto_refresh = true;
+            d.config.settings.account_refresh.insert(id.clone(), 0);
+            d.next_auto = Instant::now() - Duration::from_secs(1);
+            d.quotas.insert(id.clone(), synthetic_quota(&id, true));
+            d.clock_pending.insert(id.clone());
+        }
+        service.tick();
+        assert!(service.data.lock().unwrap().jobs.is_empty());
+        assert!(service.snapshot().next_refresh_at.is_none());
+        assert!(service
+            .refresh(RefreshRequest {
+                account_ids: Some(vec![id.clone()])
+            })
+            .is_ok());
+        let mut d = service.data.lock().unwrap();
+        assert!(d.in_flight.contains_key(&id));
+        Service::invalidate(&mut d);
+        drop(d);
+        drop(permits);
+    }
+
+    #[test]
+    fn display_and_account_preferences_persist_and_inherit() {
+        let (_dir, service, id) = synthetic_service();
+        let rev = service.settings().settings_revision;
+        let patch: SettingsPatch = serde_json::from_value(serde_json::json!({
+            "expectedRevision": rev, "accountRefresh": {id.clone(): 900},
+            "display": {"positionLocked": true},
+            "usbDisplay": {"enabled": true,"deviceId":"monitor-interface-A","themeId":"paper"}
+        }))
+        .unwrap();
+        let saved = service.update_settings(patch).unwrap();
+        assert_eq!(saved.account_interval(&id), Some(900));
+        let loaded = crate::config::load(&service.config_path).unwrap().settings;
+        assert!(loaded.display.position_locked);
+        assert_eq!(loaded.usb_display.device_id, "monitor-interface-A");
+        assert_eq!(loaded.account_interval(&id), Some(900));
+        let inherited = service.update_settings(serde_json::from_value(serde_json::json!({"expectedRevision":saved.settings_revision,"accountRefresh":{}})).unwrap()).unwrap();
+        assert_eq!(inherited.account_interval(&id), None);
+        assert!(service.update_settings(serde_json::from_value(serde_json::json!({"expectedRevision":inherited.settings_revision,"accountRefresh":{id:42}})).unwrap()).is_err());
     }
 }

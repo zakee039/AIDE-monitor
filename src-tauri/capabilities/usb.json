@@ -1,0 +1,1 @@
+{"identifier":"usb-display","description":"Independent monitor display, read only","windows":["usb-display"],"permissions":["core:event:allow-listen","core:event:allow-unlisten","hud-read"]}

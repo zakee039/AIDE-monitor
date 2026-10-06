@@ -9,6 +9,7 @@ fn main() {
         println!("cargo:rerun-if-changed=windows-app-manifest.xml");
     }
     static COMMANDS: &[&str] = &[
+        "aide_usb_displays",
         "hud_v1_capabilities_get",
         "hud_v1_accounts_list",
         "hud_v1_accounts_selection_update",

@@ -3,6 +3,9 @@ import { cloneElement, isValidElement, type ReactNode } from "react";
 let language = "en";
 export function setLanguage(locale: string) { language = locale; }
 const en: Record<string, string> = {
+  "独立于悬浮窗，自动铺满选定屏幕。设备断开后等待原屏幕重新连接。": "An independent display that fills the selected monitor and waits for the same device after disconnection.",
+  "启用屏幕展示": "Enable display", "目标屏幕": "Target monitor", "选择屏幕": "Select a monitor", "已记忆的屏幕（未连接）": "Saved monitor (disconnected)", "主题": "Theme", "屏幕主题": "Display theme", "未启用": "Disabled", "屏幕已连接": "Monitor connected", "等待原屏幕重新连接": "Waiting for the saved monitor", "自动检测 Windows 显示器；仅支持在系统显示设置中可见的 USB 小屏。": "Automatically detects Windows monitors. USB screens must be visible in Windows display settings.",
+  "薄荷初音": "miku mint", "黑暗": "dark", "明亮": "white", "锁定位置": "Lock position", "USB 监视屏": "USB display", "USB 屏幕": "USB display", "排序": "Order", "禁止": "Off",
   "保留三套内置主题，也可安装独立的 Widget 界面。":"Choose a built-in theme or install a custom widget.",
   "正在加载主题，失败时会自动恢复。":"Loading theme. The previous interface will recover if loading fails.",
   "重新加载":"Reload", "卸载":"Uninstall", "安装 Widget 主题":"Install a widget theme",

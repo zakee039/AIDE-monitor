@@ -1,0 +1,92 @@
+{
+  "version": "0.5.0",
+  "nativeSmoke": {
+    "appVersion": "0.5.0",
+    "elapsedMilliseconds": 2748,
+    "generatedAt": "2026-10-06T08:03:50.312177200+00:00",
+    "hudWindowLocked": true,
+    "isolatedSource": true,
+    "networkQueries": 0,
+    "ok": true,
+    "runtimeSettingsReopened": true,
+    "schemaVersion": 1,
+    "timedOut": false,
+    "trayPinRoundTrip": true,
+    "windows": {
+      "hud": {
+        "checks": [
+          "native-page-and-assets",
+          "hud_v1_capabilities_get",
+          "hud_v1_settings_get",
+          "hud_v1_accounts_list",
+          "aide_theme_data",
+          "aide_theme_builtins",
+          "aide_theme_builtin",
+          "hud-write-ACL-rejection",
+          "native-collapse-expand",
+          "hud_v1_window_control",
+          "runtime-settings-open",
+          "asset-and-CSP-check"
+        ],
+        "cspViolations": 0,
+        "demoVisible": false,
+        "label": "hud",
+        "methodCount": 9,
+        "nativeMain": true,
+        "ok": true,
+        "orbViewport": {
+          "contentHeight": 43,
+          "contentWidth": 43,
+          "height": 44,
+          "scale": 2.5,
+          "width": 44
+        },
+        "scopeCount": 6,
+        "viewport": {
+          "height": 104,
+          "width": 224
+        }
+      },
+      "settings": {
+        "checks": [
+          "native-page-and-assets",
+          "hud_v1_capabilities_get",
+          "hud_v1_settings_get",
+          "hud_v1_accounts_list",
+          "aide_theme_data",
+          "aide_theme_builtins",
+          "aide_theme_builtin",
+          "hud_internal_sources_get",
+          "hud_internal_startup",
+          "hud_v1_diagnostics_get",
+          "hud_v1_settings_get",
+          "hud_v1_settings_update",
+          "monitor-enumeration-and-display-preferences",
+          "aide_theme_builtin",
+          "asset-and-CSP-check"
+        ],
+        "cspViolations": 0,
+        "demoVisible": false,
+        "label": "settings",
+        "methodCount": 13,
+        "nativeMain": true,
+        "ok": true,
+        "scopeCount": 9,
+        "viewport": {
+          "height": 620,
+          "width": 720
+        }
+      }
+    }
+  },
+  "artifacts": {
+    "AIDE-monitor-0.5.0-windows-x64-setup.exe": {
+      "bytes": 4317912,
+      "sha256": "37bdaf02c0b50722f5f696454ab381c020eed9cb4e6240c526dd967c0389eeb0"
+    },
+    "AIDE-monitor-0.5.0-windows-x64.exe": {
+      "bytes": 12538368,
+      "sha256": "2ed28ddb94a685cd8512adc8aa8837efbb9b2712da0da9219a117e723054def3"
+    }
+  }
+}
