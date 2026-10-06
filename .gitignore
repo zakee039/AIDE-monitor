@@ -16,3 +16,7 @@ artifacts/legacy-previews/
 artifacts/theme-export-test.json
 
 .reference/
+artifacts/theme-smoke.json
+artifacts/*.aidetheme
+artifacts/*-SHA256SUMS.txt
+artifacts/ui-update/

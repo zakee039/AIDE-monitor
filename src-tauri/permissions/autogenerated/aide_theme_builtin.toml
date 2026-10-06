@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-aide-theme-builtin"
+description = "Enables the aide_theme_builtin command without any pre-configured scope."
+commands.allow = ["aide_theme_builtin"]
+
+[[permission]]
+identifier = "deny-aide-theme-builtin"
+description = "Denies the aide_theme_builtin command without any pre-configured scope."
+commands.deny = ["aide_theme_builtin"]

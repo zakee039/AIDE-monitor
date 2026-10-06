@@ -1,3 +1,5 @@
+> 0.4.0 主题系统已更换为独立 Widget WebView，当前规范见 [THEMES](THEMES.md) 与 [API](API.md)。下文保留早期架构背景，旧 JSON 主题与旧主题命令已删除。
+
 # 架构设计
 
 状态：V1 架构设计基线，2026-10-05。v0.1.0 已实现桌面核心与 IPC；本文还包含后续模块，已交付范围和差异以 [当前实现](IMPLEMENTATION.md) 为准。公开接口见 [API](API.md)，可用性规则见 [DOMAIN](DOMAIN.md)。

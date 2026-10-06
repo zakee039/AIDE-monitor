@@ -5,7 +5,12 @@ mod model;
 mod service;
 mod smoke;
 mod startup;
+mod theme_commands;
+mod theme_package;
+mod theme_runtime;
+mod theme_smoke;
 mod themes;
+use theme_commands::*;
 
 use model::*;
 use serde::{Deserialize, Serialize};
@@ -68,10 +73,6 @@ fn hud_v1_capabilities_get(
                     "accounts.selection.update",
                     "accounts.alias.update",
                     "settings.update",
-                    "themes.validate",
-                    "themes.preview",
-                    "themes.import",
-                    "themes.select",
                     "diagnostics.get",
                 ])
             }
@@ -137,46 +138,6 @@ fn hud_v1_accounts_alias_update(
 }
 
 #[tauri::command]
-async fn hud_internal_theme_export(
-    window: WebviewWindow,
-    service: State<'_, Service>,
-    request: Value,
-) -> Result<ApiResult<Value>, String> {
-    let service = service.inner().clone();
-    if let Err(e) = authorize(&window, true).and_then(|_| empty(&request)) {
-        return Ok(respond::<Value>(&service, Err(e)));
-    }
-    let app = window.app_handle().clone();
-    let zh = service.settings().display.locale == "zh-CN";
-    let picked = tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .set_title(if zh {
-                "保存主题示例"
-            } else {
-                "Save theme example"
-            })
-            .set_file_name("theme.json")
-            .add_filter("JSON", &["json"])
-            .blocking_save_file()
-    })
-    .await;
-    let result = match picked {
-        Ok(None) => Ok(json!({"cancelled":true})),
-        Ok(Some(file)) => file
-            .into_path()
-            .map_err(|_| ApiError::new("IO_ERROR", "Invalid save path"))
-            .and_then(|path| {
-                std::fs::write(path, include_bytes!("../../public/theme-template.json"))
-                    .map_err(|_| ApiError::new("IO_ERROR", "Cannot save theme example"))
-            })
-            .map(|_| json!({"cancelled":false})),
-        Err(_) => Err(ApiError::new("IO_ERROR", "Cannot open save dialog")),
-    };
-    Ok(respond(&service, result))
-}
-
-#[tauri::command]
 fn hud_internal_docs_open(
     window: WebviewWindow,
     service: State<'_, Service>,
@@ -199,11 +160,6 @@ fn hud_internal_docs_open(
                     ApiError::new("IO_ERROR", "Cannot create documentation directory")
                 })?;
                 let file = dir.join("api.html");
-                std::fs::write(
-                    dir.join("theme-template.json"),
-                    include_bytes!("../../public/theme-template.json"),
-                )
-                .map_err(|_| ApiError::new("IO_ERROR", "Cannot prepare theme example"))?;
                 std::fs::write(&file, include_bytes!("../../public/api.html"))
                     .map_err(|_| ApiError::new("IO_ERROR", "Cannot prepare documentation"))?;
                 #[cfg(windows)]
@@ -221,18 +177,6 @@ fn hud_internal_docs_open(
     )
 }
 
-#[tauri::command]
-fn hud_v1_quota_snapshot_get(
-    window: WebviewWindow,
-    service: State<'_, Service>,
-    request: Value,
-) -> ApiResult<Value> {
-    if let Err(e) = authorize(&window, false).and_then(|_| empty(&request)) {
-        respond::<Value>(&service, Err(e))
-    } else {
-        service.read_reply("snapshot", false)
-    }
-}
 #[tauri::command]
 fn hud_v1_recommendation_get(
     window: WebviewWindow,
@@ -316,7 +260,7 @@ fn hud_v1_settings_update(
     respond(&service, result)
 }
 #[tauri::command]
-fn hud_v1_themes_list(
+fn aide_theme_builtins(
     window: WebviewWindow,
     service: State<'_, Service>,
     request: Value,
@@ -330,107 +274,11 @@ fn hud_v1_themes_list(
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ThemeDocumentRequest {
-    document: Value,
-}
-#[tauri::command]
-fn hud_v1_themes_validate(
-    window: WebviewWindow,
-    service: State<'_, Service>,
-    request: Value,
-) -> ApiResult<Value> {
-    respond(
-        &service,
-        authorize(&window, true)
-            .and_then(|_| parse::<ThemeDocumentRequest>(request))
-            .map(|r| themes::validate(&r.document, true)),
-    )
-}
-#[tauri::command]
-fn hud_v1_themes_preview(
-    window: WebviewWindow,
-    service: State<'_, Service>,
-    request: Value,
-) -> ApiResult<Value> {
-    respond(
-        &service,
-        authorize(&window, true)
-            .and_then(|_| parse::<ThemeDocumentRequest>(request))
-            .and_then(|r| {
-                let validation = themes::validate(&r.document, false);
-                if !validation.valid {
-                    Err(ApiError::new("THEME_INVALID", "主题未通过校验，无法预览"))
-                } else {
-                    Ok(json!({"previewId":uuid::Uuid::new_v4().to_string()}))
-                }
-            }),
-    )
-}
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ThemeSelectRequest {
-    id: String,
-    expected_revision: u64,
-}
-#[tauri::command]
-fn hud_v1_themes_select(
-    window: WebviewWindow,
-    service: State<'_, Service>,
-    request: Value,
-) -> ApiResult<Value> {
-    respond(
-        &service,
-        authorize(&window, true)
-            .and_then(|_| parse::<ThemeSelectRequest>(request))
-            .and_then(|r| service.select_theme(&r.id, r.expected_revision)),
-    )
-}
-#[tauri::command]
-async fn hud_v1_themes_import(
-    window: WebviewWindow,
-    service: State<'_, Service>,
-    request: Value,
-) -> Result<ApiResult<Value>, String> {
-    let service = service.inner().clone();
-    if let Err(error) = authorize(&window, true).and_then(|_| empty(&request)) {
-        return Ok(respond::<Value>(&service, Err(error)));
-    }
-    let app = window.app_handle().clone();
-    let zh = service.settings().display.locale == "zh-CN";
-    let picked = tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .set_title(if zh {
-                "导入 HUD 主题"
-            } else {
-                "Import HUD theme"
-            })
-            .add_filter("JSON", &["json"])
-            .blocking_pick_file()
-    })
-    .await;
-    let result = match picked {
-        Ok(None) => Ok(json!({"cancelled":true,"theme":null})),
-        Ok(Some(file)) => file
-            .into_path()
-            .map_err(|_| ApiError::new("IO_ERROR", "主题文件位置无效"))
-            .and_then(|path| themes::import(&service.theme_dir, &path))
-            .and_then(|theme| {
-                serde_json::to_value(theme)
-                    .map(|v| json!({"cancelled":false,"theme":v}))
-                    .map_err(|_| ApiError::new("INTERNAL_ERROR", "主题导入失败"))
-            }),
-        Err(_) => Err(ApiError::new("IO_ERROR", "无法打开主题选择器")),
-    };
-    Ok(respond(&service, result))
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ThemeGetRequest {
     id: Option<String>,
 }
 #[tauri::command]
-fn hud_internal_theme_get(
+fn aide_theme_builtin(
     window: WebviewWindow,
     service: State<'_, Service>,
     request: Value,
@@ -681,6 +529,9 @@ fn sync_window_preferences(app: &tauri::AppHandle, settings: &Settings) {
         });
     }
 
+    if let Some(theme) = theme_runtime::visible(app) {
+        let _ = theme.set_always_on_top(settings.display.always_on_top);
+    }
     if let Some(hud) = app.get_webview_window("hud") {
         let _ = hud.set_always_on_top(settings.display.always_on_top);
     }
@@ -689,9 +540,19 @@ fn sync_window_preferences(app: &tauri::AppHandle, settings: &Settings) {
     }
 }
 fn window_action(app: &tauri::AppHandle, action: &str) -> Result<Value, ApiError> {
-    let hud = app
-        .get_webview_window("hud")
+    let hud = theme_runtime::target(app)
+        .or_else(|| app.get_webview_window("hud"))
         .ok_or_else(|| ApiError::new("NOT_FOUND", "悬浮窗不可用"))?;
+    if action == "show" {
+        theme_runtime::set_hidden(
+            app,
+            app.state::<theme_runtime::Runtime>()
+                .folded
+                .load(std::sync::atomic::Ordering::SeqCst),
+        );
+    } else if action == "hide" {
+        theme_runtime::set_hidden(app, true);
+    }
     match action {
         "show" => hud
             .show()
@@ -726,7 +587,7 @@ fn aide_hud_context_menu(
     service: State<'_, Service>,
     layout: State<'_, HudLayoutState>,
 ) -> Result<(), String> {
-    if window.label() != "hud" {
+    if window.label() != "hud" && !theme_runtime::is_session(window.app_handle(), window.label()) {
         return Err("FORBIDDEN".into());
     }
     let zh = service.settings().display.locale == "zh-CN";
@@ -833,6 +694,11 @@ async fn hud_internal_window_layout(
         if !request.collapsed {
             layout.expanded_width = request.width;
         }
+        if theme_package::BUILTINS.contains(&service.settings().active_theme_id.as_str())
+            && !smoke::is_enabled()
+        {
+            let _ = window.show();
+        }
         Ok(json!({"accepted":true}))
     })();
     Ok(respond(&service, result))
@@ -861,6 +727,14 @@ pub fn run() {
     }
     tauri::Builder::default()
         .manage(HudLayoutState::default())
+        .manage(theme_runtime::Runtime::default())
+        .register_asynchronous_uri_scheme_protocol("aide", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            let label = ctx.webview_label().to_string();
+            tauri::async_runtime::spawn_blocking(move || {
+                responder.respond(theme_runtime::response(&app, &label, request))
+            });
+        })
         .on_menu_event(|app, event| match event.id.as_ref() {
             "aide-refresh" => {
                 let _ = app
@@ -868,6 +742,9 @@ pub fn run() {
                     .refresh(RefreshRequest { account_ids: None });
             }
             "aide-toggle" => {
+                if theme_runtime::toggle(app) {
+                    return;
+                }
                 if let Some(hud) = app.get_webview_window("hud") {
                     let _ = hud.emit("aide://toggle-collapse", ());
                 }
@@ -891,19 +768,13 @@ pub fn run() {
             hud_v1_accounts_list,
             hud_v1_accounts_selection_update,
             hud_v1_accounts_alias_update,
-            hud_internal_theme_export,
             hud_internal_docs_open,
-            hud_v1_quota_snapshot_get,
             hud_v1_recommendation_get,
             hud_v1_refresh_request,
             hud_v1_refresh_status_get,
             hud_v1_settings_get,
             hud_v1_settings_update,
-            hud_v1_themes_list,
-            hud_v1_themes_validate,
-            hud_v1_themes_preview,
-            hud_v1_themes_import,
-            hud_v1_themes_select,
+            aide_theme_builtins,
             hud_v1_window_control,
             hud_v1_diagnostics_get,
             hud_internal_sources_get,
@@ -913,9 +784,15 @@ pub fn run() {
             hud_internal_source_get,
             hud_internal_source_choose,
             hud_internal_source_rescan,
-            hud_internal_theme_get,
+            aide_theme_builtin,
             hud_internal_window_layout,
-            aide_hud_context_menu
+            aide_hud_context_menu,
+            aide_theme_list,
+            aide_theme_data,
+            aide_theme_install,
+            aide_theme_select,
+            aide_theme_uninstall,
+            aide_theme_resume
         ])
         .setup(|app| {
             if smoke::is_enabled() {
@@ -926,7 +803,9 @@ pub fn run() {
                 pin_item(app.handle(), &service)?;
                 app.manage(service);
                 // The HUD smoke script opens settings through the real IPC path.
-                if smoke::is_interactive() {
+                if theme_smoke::enabled() {
+                    theme_smoke::start(app.handle());
+                } else if smoke::is_interactive() {
                     let _ = open_settings_from_tray(app.handle());
                 } else {
                     smoke::start_poll(app.handle());
@@ -934,29 +813,6 @@ pub fn run() {
                 return Ok(());
             }
             let dir = app.path().app_data_dir()?;
-            if !dir.join("settings.json").exists() {
-                let legacy = dir
-                    .parent()
-                    .map(|p| p.join("dev.cockpit-quota-hud.desktop"));
-                if let Some(legacy) = legacy.filter(|p| p.join("settings.json").is_file()) {
-                    let mut previous = config::load(&legacy.join("settings.json"))
-                        .map_err(|e| std::io::Error::other(e.message))?;
-                    previous.settings.display.locale = "en".into();
-                    config::atomic_json(&dir.join("settings.json"), &previous)
-                        .map_err(|e| std::io::Error::other(e.message))?;
-                    if let Ok(files) = std::fs::read_dir(legacy.join("themes")) {
-                        std::fs::create_dir_all(dir.join("themes"))?;
-                        for file in files.flatten() {
-                            if file.path().extension().and_then(|x| x.to_str()) == Some("json") {
-                                std::fs::copy(
-                                    file.path(),
-                                    dir.join("themes").join(file.file_name()),
-                                )?;
-                            }
-                        }
-                    }
-                }
-            }
             let service = Service::new(dir, Some(app.handle().clone()))
                 .map_err(|error| std::io::Error::other(error.message))?;
             if let Some(hud) = app.get_webview_window("hud") {
@@ -975,13 +831,24 @@ pub fn run() {
                     }
                 }
             }
+            let _ = theme_package::collect_orphans(&theme_runtime::root(&service));
             app.manage(service.clone());
+            let startup_theme = service.settings().active_theme_id.clone();
+            if !theme_package::BUILTINS.contains(&startup_theme.as_str()) {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if theme_runtime::select(&handle, &startup_theme).is_err() {
+                        theme_runtime::restore(&handle, Some("主题启动失败，已恢复默认主题"));
+                    }
+                });
+            }
             let show = MenuItem::with_id(app, "show", "显示悬浮窗", true, None::<&str>)?;
             let hide = MenuItem::with_id(app, "hide", "隐藏悬浮窗", true, None::<&str>)?;
             let pin = pin_item(app.handle(), &service)?;
             let refresh = MenuItem::with_id(app, "refresh", "刷新全部", true, None::<&str>)?;
             let settings = MenuItem::with_id(app, "settings", "设置…", true, None::<&str>)?;
             let restore = MenuItem::with_id(app, "restore", "恢复窗口位置", true, None::<&str>)?;
+            let recover = MenuItem::with_id(app, "recover", "恢复内置主题", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             app.manage(TrayLabels(vec![
                 (show.clone(), "Show HUD", "显示悬浮窗"),
@@ -989,6 +856,7 @@ pub fn run() {
                 (refresh.clone(), "Refresh all", "刷新全部"),
                 (settings.clone(), "Settings…", "设置…"),
                 (restore.clone(), "Restore position", "恢复窗口位置"),
+                (recover.clone(), "Restore built-in theme", "恢复内置主题"),
                 (quit.clone(), "Quit", "退出"),
             ]));
             sync_window_preferences(app.handle(), &service.settings());
@@ -996,7 +864,7 @@ pub fn run() {
             let menu = Menu::with_items(
                 app,
                 &[
-                    &pin, &settings, &refresh, &separator, &show, &hide, &restore, &quit,
+                    &pin, &settings, &refresh, &separator, &show, &hide, &restore, &recover, &quit,
                 ],
             )?;
             let mut tray = TrayIconBuilder::new()
@@ -1015,6 +883,12 @@ pub fn run() {
                     }
                     "settings" => {
                         open_settings_from_tray(app);
+                    }
+                    "recover" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            theme_runtime::restore(&app, None)
+                        });
                     }
                     "pin" => toggle_pin(app),
                     "refresh" => {
@@ -1045,6 +919,19 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label().starts_with("aide-theme-") {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    theme_runtime::set_hidden(window.app_handle(), true);
+                }
+                if let tauri::WindowEvent::Moved(position) = event {
+                    window
+                        .app_handle()
+                        .state::<Service>()
+                        .remember_position(position.x, position.y);
+                }
+            }
             if window.label() == "hud" {
                 match event {
                     tauri::WindowEvent::CloseRequested { api, .. } => {

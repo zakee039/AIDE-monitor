@@ -1,3 +1,4 @@
+import { ThemeManager } from "./ThemeManager";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { orbDisplay } from "./orb";
@@ -5,9 +6,8 @@ import { localize, setLanguage, t } from "./i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AccountAvailability, AccountQuota, AccountSummary, Capabilities, Diagnostics, QuotaWindow, Settings, SettingsPatch, Snapshot, ThemeSummary } from "../contracts/hud-api";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, CircleAlert, EyeOff, Database, FilePlus2, Info, Layers3, LoaderCircle, Palette, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, CircleAlert, EyeOff, Database, Info, Layers3, LoaderCircle, Palette, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, X } from "lucide-react";
 import { call, desktop, errorMessage, hud, internal, type SourceOption } from "./api";
-import { demoSnapshot } from "./demo";
 import { defaultTheme, themeStyle, type ThemeDocument } from "./themes";
 
 interface AppState {
@@ -128,6 +128,8 @@ export default function App() {
     window.addEventListener("dblclick", doubleClick, true);
     return () => { active = false; stop?.(); window.removeEventListener("contextmenu", context, true); window.removeEventListener("dblclick", doubleClick, true); };
   }, [settingsView]);
+  useEffect(()=>{if(!desktop||settingsView)return;let active=true;let stop:(()=>void)|undefined;void listen<boolean>('aide://set-collapse',event=>setCollapsed(event.payload)).then(fn=>{if(active)stop=fn;else fn();});return()=>{active=false;stop?.();};},[settingsView]);
+  useEffect(()=>{if(desktop&&!settingsView&&!collapsed)void invoke('aide_theme_resume').catch(()=>{});},[collapsed,settingsView]);
   const panelRef = useRef<HTMLDivElement>(null);
   const layoutQueue = useRef<Promise<unknown>>(Promise.resolve());
 
@@ -304,7 +306,6 @@ type Performer = (key: string, action: () => Promise<unknown>, success?: string)
 type SettingSection = "general" | "accounts" | "themes" | "about";
 
 function SettingsView({ state, loading, error, notice, busy, perform, reload, onBack }: { state: AppState; loading: boolean; error: string | null; notice: string | null; busy: string | null; perform: Performer; reload: () => Promise<void>; onBack: () => void }) {
-  const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [section, setSection] = useState<SettingSection>("general");
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [sources, setSources] = useState<SourceOption[]>([]);
@@ -315,8 +316,6 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
 
   const [selection, setSelection] = useState<string[]>([]);
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
-  const [preview, setPreview] = useState<ThemeDocument | null>(null);
-  const [imported, setImported] = useState<ThemeSummary | null>(null);
   const [interval, setIntervalValue] = useState("300");
   const savedSelection = JSON.stringify(state.accounts.filter(account => account.selected).sort((a, b) => a.order - b.order).map(account => account.id));
   useEffect(() => { setSelection(JSON.parse(savedSelection) as string[]); }, [savedSelection]);
@@ -325,9 +324,6 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
   const patch = (key: string, fields: Omit<SettingsPatch, "expectedRevision">) => { if (settings) void perform(key, () => call("settings.update", { expectedRevision: settings.settingsRevision, ...fields })); };
   const chooseSource = openSources;
   const rescan = () => { void perform("rescan", () => internal("source_rescan", {}), "账号列表已重新读取。"); };
-  const selectTheme = (id: string) => { if (settings) void perform("select-theme", async () => { await call("themes.select", { id, expectedRevision: settings.settingsRevision }); setPreview(null); setImported(null); }, "主题已应用。"); };
-  const previewTheme = (id: string) => { void perform("preview-theme", async () => { const document = await internal("theme_get", { id }); await call("themes.preview", { document }); setPreview(document); }); };
-  const importTheme = () => { void perform("import-theme", async () => { const response = await call("themes.import", {}); if (response.data.cancelled || !response.data.theme) return; const theme = response.data.theme; setImported(theme); const document = await internal("theme_get", { id: theme.id }); await call("themes.preview", { document }); setPreview(document); }); };
   const changeOrder = (id: string, direction: number) => setSelection(current => { const index = current.indexOf(id); const destination = index + direction; if (index < 0 || destination < 0 || destination >= current.length) return current; const next = [...current]; [next[index], next[destination]] = [next[destination], next[index]]; return next; });
   const selectionDirty = JSON.stringify(selection) !== JSON.stringify(state.accounts.filter(account => account.selected).sort((a, b) => a.order - b.order).map(account => account.id));
   const nav = [{ id: "general", label: "常规", icon: <SlidersHorizontal size={17} /> }, { id: "accounts", label: "账号", icon: <Database size={17} /> }, { id: "themes", label: "外观", icon: <Palette size={17} /> }, { id: "about", label: "关于", icon: <Info size={17} /> }] as const;
@@ -338,7 +334,6 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
     {!desktop && <DemoBanner />}
     <div className="settings-layout"><aside className="settings-sidebar"><div className="sidebar-kicker">WORKSPACE</div><nav aria-label="设置分区">{nav.map(item => <button key={item.id} className={`nav-button ${section === item.id ? "selected" : ""}`} onClick={() => setSection(item.id)}>{item.icon}<span>{item.label}</span><ChevronRight size={13} /></button>)}</nav><div className="sidebar-footer"><ShieldCheck size={15} /><span>凭据只留在本机</span><small>v{state.capabilities?.appVersion ?? "—"}</small></div></aside>
     <section className="settings-content">
-      {exportNotice && <div className="settings-alert success" role="status">{exportNotice}</div>}
       {(error || notice) && <div className={error ? "settings-alert error" : "settings-alert success"} role={error ? "alert" : "status"}>{error ? <CircleAlert size={16} /> : <Check size={16} />}<span>{error ?? notice}</span></div>}
       {loading && !settings ? <div className="empty-state"><LoaderCircle size={24} className="spin" /><span>正在读取设置</span></div> : <>
       {section === "general" && <>
@@ -352,12 +347,7 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
         <div className="selection-list">{state.accounts.length ? [...state.accounts].sort((a, b) => { const ai = selection.indexOf(a.id); const bi = selection.indexOf(b.id); return (ai < 0 ? 1000 + a.order : ai) - (bi < 0 ? 1000 + b.order : bi); }).map(account => <div className={`selection-row ${selection.includes(account.id) ? "chosen" : ""}`} key={account.id}><label><input type="checkbox" checked={selection.includes(account.id)} disabled={busy !== null || account.support === "unsupported"} onChange={event => setSelection(current => event.target.checked ? [...current, account.id] : current.filter(id => id !== account.id))} /><span className="selection-check"><Check size={12} /></span><ProviderIcon provider={account.providerId} /><span className="selection-identity"><strong translate="no">{account.displayName}</strong><span>{["codex", "codex_usage"].includes(account.providerId) ? "Codex" : account.providerId} · {account.support === "unsupported" ? "暂不支持" : account.support === "unknown" ? "支持情况待核实" : account.isCurrent ? "当前本机登录" : "已发现"}</span></span></label><AliasInput account={account} reload={reload} />{<div className={`order-actions ${selection.includes(account.id) ? "" : "order-placeholder"}`}><button className="icon-button" aria-label={`上移 ${account.displayName}`} disabled={busy !== null || selection.indexOf(account.id) === 0} onClick={() => changeOrder(account.id, -1)}><ArrowUp size={14} /></button><button className="icon-button" aria-label={`下移 ${account.displayName}`} disabled={busy !== null || selection.indexOf(account.id) === selection.length - 1} onClick={() => changeOrder(account.id, 1)}><ArrowDown size={14} /></button></div>}</div>) : <div className="empty-state"><Database size={24} /><strong>尚未发现账号</strong><span>选择含 auth.json 或 codex_accounts.json 的目录，再重新扫描。</span><button className="secondary-button" disabled={busy !== null} onClick={chooseSource}>选择数据目录</button></div>}</div>
         <div className="form-actions"><span>最多显示 {state.capabilities?.maxRefreshAccounts ?? 100} 个账号</span><button className="primary-button" disabled={busy !== null || !settings || !selectionDirty || selection.length > (state.capabilities?.maxRefreshAccounts ?? 100)} onClick={() => { if (settings) void perform("selection", () => call("accounts.selection.update", { expectedRevision: settings.settingsRevision, accountIds: selection }), "账号选择已保存。"); }}>{busy === "selection" ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}保存选择</button></div>
       </>}
-      {section === "themes" && <><SectionHeading eyebrow="MAKE IT YOURS" title="外观" description="选择内置主题，或导入自己编写的主题文件。" />
-        <div className="themes-grid">{state.themes.map(theme => <div className={`theme-option ${settings?.activeThemeId === theme.id ? "theme-active" : ""}`} key={theme.id}><button className={`theme-swatch swatch-${theme.id === "paper" ? "paper" : theme.id === "midnight" ? "midnight" : "default"}`} aria-label={`预览 ${theme.name}`} disabled={busy !== null} onClick={() => previewTheme(theme.id)}><div className="mini-header"><span /><span /><span /></div>{[0, 1, 2].map(index => <div className="mini-row" key={index}><span /><span /><span /></div>)}<div className="mini-recommendation" /></button><div className="theme-option-info"><span><strong>{theme.name}</strong><small>{theme.builtIn ? "内置主题" : "自定义主题"}</small></span><button className={`theme-apply ${settings?.activeThemeId === theme.id ? "selected" : ""}`} disabled={busy !== null || settings?.activeThemeId === theme.id} aria-label={settings?.activeThemeId === theme.id ? `${theme.name} 已应用` : `应用 ${theme.name}`} onClick={() => selectTheme(theme.id)}>{settings?.activeThemeId === theme.id ? <Check size={16} /> : "应用"}</button></div></div>)}</div>
-        <div className="theme-import-card"><div className="import-icon"><FilePlus2 size={21} /></div><div><strong>添加自己的主题</strong><p>用 theme.json 定制颜色、字体与布局</p></div><button className="secondary-button" disabled={busy !== null} onClick={importTheme}>{busy === "import-theme" ? <LoaderCircle size={14} className="spin" /> : <FilePlus2 size={14} />}导入主题</button></div>
-        {preview && <div className="theme-preview-section"><div className="preview-heading"><span><span className="demo-label">PREVIEW</span>{preview.name} · 虚构数据</span><button className="icon-button" aria-label="关闭主题预览" onClick={() => { setPreview(null); setImported(null); }}><X size={15} /></button></div><div className="embedded-hud" style={themeStyle(preview)}><HudContent snapshot={demoSnapshot()} theme={preview} now={Date.now()} /></div><div className="form-actions"><span>主题只改变外观，不改变配额判断</span><button className="primary-button" disabled={busy !== null} onClick={() => selectTheme(imported?.id ?? preview.id)}>应用此主题 <Check size={14} /></button></div></div>}
-        <p className="helper-note"><ShieldCheck size={14} />主题仅接受本地 JSON，导入前会校验格式与可读性。<button className="text-button" disabled={busy !== null} onClick={() => { if (desktop) void perform("export-theme", async () => { const result = await internal("theme_export", {}); if (!result.cancelled) setExportNotice(t("主题示例已保存。")); }); else { const link = document.createElement("a"); link.href = "/theme-template.json"; link.download = "theme.json"; link.click(); } }}>下载示例</button></p>
-      </>}
+      {section === "themes" && <ThemeManager onChanged={reload} />}
       {section === "about" && <><SectionHeading eyebrow="SMALL FOOTPRINT" title="专注配额，轻量常驻。" description="Tauri 2 + Rust · 开放接口 · 可自行扩展主题" /><SettingsCard title="AIDE monitor" description={state.capabilities?.appVersion ?? "—"} icon={<Layers3 size={18} />}><p className="about-description">读取官方客户端或 Cockpit Tools 登录账号，展示配额与重置时间。认证失效请在原客户端重新登录。</p><div className="about-status"><span className="status-dot" />{desktop ? "正在桌面应用中运行" : "浏览器演示，全部数据均为虚构"}</div></SettingsCard><SettingsCard title="开放能力" description="以当前应用实际提供的方法为准" icon={<SlidersHorizontal size={17} />} action={<button className="text-button" onClick={() => { if (desktop) void perform("docs", () => internal("docs_open", {})); else window.open("/api.html", "_blank", "noopener,noreferrer"); }}>接口说明 <ChevronRight size={14} /></button>}><div className="capability-summary"><div><strong>{state.capabilities?.enabledMethods.length ?? 0}</strong><span>可用方法</span></div><div><strong>{state.capabilities?.apiVersion ?? "—"}</strong><span>接口版本</span></div><div><strong>{state.capabilities?.themeSchemaVersions.join(", ") ?? "—"}</strong><span>主题版本</span></div></div><div className="card-bottom"><span>第一版通过应用内部接口调用。</span><button className="text-button" disabled={busy !== null || !state.capabilities?.enabledMethods.includes("diagnostics.get")} onClick={() => { void perform("diagnostics", async () => { const response = await call("diagnostics.get", {}); setDiagnostics(response.data); }); }}>检查状态 <ChevronRight size={14} /></button></div>{diagnostics && <div className="diagnostics-summary"><div><span>适配器版本</span><span>{diagnostics.adapterVersion}</span></div><div><span>所选账号 / 进行中的刷新</span><span>{diagnostics.selectedAccountCount} / {diagnostics.activeJobCount}</span></div><div><span>最近错误</span><span>{diagnostics.recentErrorCodes.length ? diagnostics.recentErrorCodes.join("、") : "暂无"}</span></div></div>}</SettingsCard><button className="text-button" disabled={busy !== null} onClick={() => { void perform("position", () => call("window.control", { action: "restore_position" }), "窗口位置已恢复。"); }}>恢复悬浮窗位置</button></>}
       </>}
       <div className="settings-content-footer"><ShieldCheck size={12} /><span>读取凭据与配额均由本机后台处理</span><button className="text-button" onClick={() => { void reload(); }} disabled={busy !== null}>同步状态</button></div>

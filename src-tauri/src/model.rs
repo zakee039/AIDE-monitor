@@ -330,21 +330,6 @@ pub struct ThemeSummary {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ThemeIssue {
-    pub path: String,
-    pub code: String,
-    pub message: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ThemeValidation {
-    pub valid: bool,
-    pub issues: Vec<ThemeIssue>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct Diagnostics {
     pub app_version: String,
     pub adapter_version: String,

@@ -23,7 +23,7 @@ function envelope<T>(value: unknown): ApiResult<T> {
 export const hud: HudClient = {
   async call(method, params) {
     const value = desktop
-      ? await invoke(`hud_v1_${method.replaceAll(".", "_")}`, { request: params })
+      ? await invoke(method === "quota.snapshot.get" ? "aide_theme_data" : method === "themes.list" ? "aide_theme_builtins" : `hud_v1_${method.replaceAll(".", "_")}`, { request: params })
       : await demoCall(method, params);
     return envelope(value);
   },
@@ -49,7 +49,6 @@ interface InternalMethods {
   startup: { params: { enabled?: boolean }; data: { enabled: boolean } };
   window_layout: { params: { collapsed: boolean; width: number; height: number }; data: { accepted: boolean } };
   docs_open: { params: Record<string, never>; data: { opened: boolean } };
-  theme_export: { params: Record<string, never>; data: { cancelled: boolean } };
   source_get: { params: Record<string, never>; data: { path: string | null } };
   source_choose: { params: Record<string, never>; data: { cancelled: boolean; path: string | null; source: SourceStatus } };
   source_rescan: { params: Record<string, never>; data: SourceStatus };
@@ -57,7 +56,7 @@ interface InternalMethods {
 }
 
 export async function internal<M extends keyof InternalMethods>(method: M, request: InternalMethods[M]["params"]): Promise<InternalMethods[M]["data"]> {
-  const result = envelope<InternalMethods[M]["data"]>(desktop ? await invoke(`hud_internal_${method}`, { request }) : await demoInternal(method, request));
+  const result = envelope<InternalMethods[M]["data"]>(desktop ? await invoke(method === "theme_get" ? "aide_theme_builtin" : `hud_internal_${method}`, { request }) : await demoInternal(method, request));
   if (!result.ok) throw new HudApiError(result.error);
   return result.data;
 }

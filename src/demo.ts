@@ -136,14 +136,14 @@ export function demoSnapshot(): Snapshot {
   };
 }
 
-const methods = ["capabilities.get", "accounts.list", "accounts.alias.update", "accounts.selection.update", "quota.snapshot.get", "recommendation.get", "refresh.request", "refresh.status.get", "settings.get", "settings.update", "themes.list", "themes.validate", "themes.preview", "themes.import", "themes.select", "window.control", "diagnostics.get"];
+const methods = ["capabilities.get", "accounts.list", "accounts.alias.update", "accounts.selection.update", "quota.snapshot.get", "recommendation.get", "refresh.request", "refresh.status.get", "settings.get", "settings.update", "themes.list", "window.control", "diagnostics.get"];
 
 export async function demoCall<M extends keyof MethodMap>(method: M, params: MethodMap[M]["params"]): Promise<ApiResult<MethodMap[M]["result"]>> {
   const request = params as Record<string, unknown>;
   let response: ApiResult<unknown>;
-  if (["settings.update", "themes.select", "accounts.selection.update"].includes(method) && request.expectedRevision !== settings.settingsRevision) return fail("CONFLICT", "设置已更新，请重试。") as ApiResult<MethodMap[M]["result"]>;
+  if (["settings.update", "accounts.selection.update"].includes(method) && request.expectedRevision !== settings.settingsRevision) return fail("CONFLICT", "设置已更新，请重试。") as ApiResult<MethodMap[M]["result"]>;
   switch (method) {
-    case "capabilities.get": response = result({ appVersion: "0.3.1", apiVersion: "1.0", transport: "tauri", enabledMethods: methods, grantedScopes: ["quota.read", "quota.refresh", "events.read", "settings.read", "settings.write", "themes.read", "themes.write", "window.control", "diagnostics.read"], themeSchemaVersions: [1], providerIds: ["codex"], maxRefreshAccounts: 100 }); break;
+    case "capabilities.get": response = result({ appVersion: "0.4.0", apiVersion: "1.0", transport: "tauri", enabledMethods: methods, grantedScopes: ["quota.read", "quota.refresh", "events.read", "settings.read", "settings.write", "themes.read", "themes.write", "window.control", "diagnostics.read"], themeSchemaVersions: [1], providerIds: ["codex"], maxRefreshAccounts: 100 }); break;
     case "accounts.list": response = result(accounts.map((account, index) => ({ ...account, displayName: settings.display.privacyMode ? `${settings.display.locale === "zh-CN" ? "账号" : "Account"} ${index + 1}` : account.displayName }))); break;
     case "quota.snapshot.get": response = result(demoSnapshot()); break;
     case "recommendation.get": response = result(demoSnapshot().recommendation); break;
@@ -177,26 +177,6 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
     }
     case "refresh.status.get": response = jobs.has(request.jobId as string) ? result(jobs.get(request.jobId as string)) : fail("NOT_FOUND", "刷新任务不存在。"); break;
     case "themes.list": response = result(Array.from(themes.values(), theme => ({ id: theme.id, name: theme.name, builtIn: ["default", "midnight", "paper"].includes(theme.id) } satisfies ThemeSummary))); break;
-    case "themes.validate": response = result(validateDemoTheme(request.document)); break;
-    case "themes.preview": response = validateDemoTheme(request.document).valid ? result({ previewId: crypto.randomUUID() }) : fail("THEME_INVALID", "主题格式无效。"); break;
-    case "themes.import": {
-      const file = await chooseJson();
-      if (!file) { response = result({ cancelled: true, theme: null }); break; }
-      if (file.size > 65536) { response = fail("THEME_INVALID", "主题文件不能超过 64 KB。"); break; }
-      try {
-        const document: unknown = JSON.parse(await file.text());
-        const validation = validateDemoTheme(document);
-        if (!validation.valid) { response = fail("THEME_INVALID", validation.issues[0].message); break; }
-        const theme = document as ThemeDocument;
-        if (["default", "midnight", "paper"].includes(theme.id) || themes.has(theme.id)) { response = fail("THEME_INVALID", "主题 ID 已存在，请使用新的 ID。"); break; }
-        themes.set(theme.id, theme); response = result({ cancelled: false, theme: { id: theme.id, name: theme.name, builtIn: false } });
-      } catch { response = fail("THEME_INVALID", "请导入有效的 JSON 主题文件。"); }
-      break;
-    }
-    case "themes.select": {
-      if (!themes.has(request.id as string)) { response = fail("NOT_FOUND", "主题不存在。"); break; }
-      settings = { ...settings, activeThemeId: request.id as string, settingsRevision: settings.settingsRevision + 1 }; emit("theme.changed"); response = result(settings); break;
-    }
     case "accounts.alias.update": {
       const { accountId, alias } = params as MethodMap["accounts.alias.update"]["params"];
       const account = accounts.find(a => a.id === accountId);
@@ -205,7 +185,7 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
       settings.settingsRevision++; emit("snapshot.changed"); response = result(settings); break;
     }
     case "window.control": response = result({ accepted: true }); break;
-    case "diagnostics.get": response = result({ appVersion: "0.3.1", adapterVersion: "演示", source, selectedAccountCount: accounts.filter(account => account.selected).length, activeJobCount: refreshing ? 1 : 0, recentErrorCodes: [] }); break;
+    case "diagnostics.get": response = result({ appVersion: "0.4.0", adapterVersion: "演示", source, selectedAccountCount: accounts.filter(account => account.selected).length, activeJobCount: refreshing ? 1 : 0, recentErrorCodes: [] }); break;
     default: response = fail("INVALID_ARGUMENT", "此功能尚未提供。");
   }
   return response as ApiResult<MethodMap[M]["result"]>;
@@ -217,7 +197,7 @@ export async function demoInternal(method: string, request: object): Promise<Api
   switch (method) {
     case "startup": { const v = (request as { enabled?: boolean }).enabled; if (v !== undefined) demoStartup = v; return result({ enabled: demoStartup }); }
     case "sources_get": return result(demoSources);
-    case "sources_save": demoSources = (request as { sources: typeof demoSources }).sources; return result({ state: "ready", format: "unknown", adapterVersion: "0.3.1", error: null });
+    case "sources_save": demoSources = (request as { sources: typeof demoSources }).sources; return result({ state: "ready", format: "unknown", adapterVersion: "0.4.0", error: null });
     case "sources_pick": return result({ path: "C:/Demo/Accounts" });
     case "source_get": return result({ path: "浏览器演示 · 虚构账号" });
     case "source_choose": emit("source.changed"); return result({ cancelled: false, path: "浏览器演示 · 虚构账号", source });
@@ -227,14 +207,7 @@ export async function demoInternal(method: string, request: object): Promise<Api
   }
 }
 
-function chooseJson(): Promise<File | null> {
-  return new Promise(resolve => {
-    const input = document.createElement("input"); input.type = "file"; input.accept = ".json,application/json";
-    input.onchange = () => { resolve(input.files?.[0] ?? null); input.remove(); };
-    input.oncancel = () => { resolve(null); input.remove(); };
-    input.style.display = "none"; document.body.append(input); input.click();
-  });
-}
+
 
 /** The desktop host performs authoritative schema, contrast and storage checks. */
 export function validateDemoTheme(value: unknown): ThemeValidation {

@@ -1,14 +1,14 @@
 [[permission]]
 identifier = "hud-read"
 description = "Read redacted HUD data and installed theme metadata"
-commands.allow = ["hud_v1_capabilities_get", "hud_v1_accounts_list", "hud_v1_quota_snapshot_get", "hud_v1_recommendation_get", "hud_v1_refresh_status_get", "hud_v1_settings_get", "hud_v1_themes_list", "hud_internal_theme_get"]
+commands.allow = ["aide_theme_data", "hud_v1_capabilities_get", "hud_v1_accounts_list", "hud_v1_recommendation_get", "hud_v1_refresh_status_get", "hud_v1_settings_get", "aide_theme_builtins", "aide_theme_builtin"]
 
 [[permission]]
 identifier = "hud-actions"
 description = "Refresh selected accounts and control trusted windows"
-commands.allow = ["hud_v1_refresh_request", "hud_v1_window_control", "hud_internal_window_layout", "aide_hud_context_menu"]
+commands.allow = ["aide_theme_resume", "hud_v1_refresh_request", "hud_v1_window_control", "hud_internal_window_layout", "aide_hud_context_menu"]
 
 [[permission]]
 identifier = "settings-actions"
 description = "Configure the HUD through its trusted settings window"
-commands.allow = ["hud_v1_accounts_selection_update", "hud_v1_accounts_alias_update", "hud_internal_theme_export", "hud_internal_docs_open", "hud_v1_settings_update", "hud_v1_themes_validate", "hud_v1_themes_preview", "hud_v1_themes_import", "hud_v1_themes_select", "hud_v1_diagnostics_get", "hud_internal_sources_get", "hud_internal_sources_save", "hud_internal_sources_pick", "hud_internal_startup", "hud_internal_source_get", "hud_internal_source_choose", "hud_internal_source_rescan"]
+commands.allow = ["aide_theme_list", "aide_theme_install", "aide_theme_select", "aide_theme_uninstall", "hud_v1_accounts_selection_update", "hud_v1_accounts_alias_update", "hud_internal_docs_open", "hud_v1_settings_update", "hud_v1_diagnostics_get", "hud_internal_sources_get", "hud_internal_sources_save", "hud_internal_sources_pick", "hud_internal_startup", "hud_internal_source_get", "hud_internal_source_choose", "hud_internal_source_rescan"]

@@ -1,94 +1,57 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AIDE monitor Theme V1",
-  "description": "Declarative local theme contract. Version comparison, contrast, reserved IDs, file limits and safe rendering require host validation.",
+  "title": "AIDE monitor Theme Manifest v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "minHudVersion", "id", "name", "tokens", "layout"],
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "version",
+    "apiVersion"
+  ],
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "minHudVersion": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "apiVersion": {
+      "const": "1"
+    },
+    "id": {
       "type": "string",
-      "maxLength": 32,
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?![\\s\\S])"
-    },
-    "id": { "type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])" },
-    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
-    "author": { "type": "string", "minLength": 1, "maxLength": 120 },
-    "description": { "type": "string", "minLength": 1, "maxLength": 400 },
-    "tokens": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["colors", "typography", "spacing", "radius"],
-      "properties": {
-        "colors": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["background", "surface", "text", "textMuted", "border", "accent", "accentText", "success", "warning", "exhausted", "error", "unknown", "stale"],
-          "properties": {
-            "background": { "$ref": "#/$defs/color" },
-            "surface": { "$ref": "#/$defs/color" },
-            "text": { "$ref": "#/$defs/color" },
-            "textMuted": { "$ref": "#/$defs/color" },
-            "border": { "$ref": "#/$defs/color" },
-            "accent": { "$ref": "#/$defs/color" },
-            "accentText": { "$ref": "#/$defs/color" },
-            "success": { "$ref": "#/$defs/color" },
-            "warning": { "$ref": "#/$defs/color" },
-            "exhausted": { "$ref": "#/$defs/color" },
-            "error": { "$ref": "#/$defs/color" },
-            "unknown": { "$ref": "#/$defs/color" },
-            "stale": { "$ref": "#/$defs/color" }
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[a-z](?:[a-z0-9.-]*[a-z0-9-])?$",
+      "not": {
+        "enum": [
+          "default",
+          "midnight",
+          "paper"
+        ]
+      },
+      "allOf": [
+        {
+          "not": {
+            "pattern": "\\.\\."
           }
-        },
-        "typography": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["fontFamily", "fontSize", "lineHeight"],
-          "properties": {
-            "fontFamily": { "enum": ["system", "system-monospace"] },
-            "fontSize": { "type": "integer", "minimum": 12, "maximum": 20 },
-            "lineHeight": { "type": "number", "minimum": 1.2, "maximum": 1.8 }
-          }
-        },
-        "spacing": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["padding", "gap"],
-          "properties": {
-            "padding": { "type": "integer", "minimum": 4, "maximum": 24 },
-            "gap": { "type": "integer", "minimum": 4, "maximum": 20 }
-          }
-        },
-        "radius": { "type": "integer", "minimum": 0, "maximum": 20 }
-      }
-    },
-    "layout": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["preset", "density", "quotaVisualization", "regionOrder", "accountSlots"],
-      "properties": {
-        "preset": { "enum": ["compact-rows", "cards", "horizontal"] },
-        "density": { "enum": ["compact", "comfortable"] },
-        "quotaVisualization": { "enum": ["text", "bar-text"] },
-        "regionOrder": {
-          "type": "array",
-          "minItems": 2,
-          "maxItems": 2,
-          "uniqueItems": true,
-          "items": { "enum": ["accounts", "recommendation"] }
-        },
-        "accountSlots": {
-          "type": "array",
-          "minItems": 3,
-          "maxItems": 3,
-          "uniqueItems": true,
-          "items": { "enum": ["account-label", "quota-windows", "availability"] }
         }
-      }
+      ]
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "version": {
+      "type": "string",
+      "description": "SemVer; Rust installer performs authoritative validation"
+    },
+    "author": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 100
     }
-  },
-  "$defs": {
-    "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}(?![\\s\\S])" }
   }
 }

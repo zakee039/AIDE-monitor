@@ -62,7 +62,13 @@ impl Service {
         if config.source_path.is_none() && !cfg!(test) {
             config.source_path = cockpit::discover_root()
         }
-        if themes::get(&data_dir.join("themes"), &config.settings.active_theme_id).is_err() {
+        if themes::builtin(&config.settings.active_theme_id).is_none()
+            && crate::theme_package::installed(
+                &data_dir.join("themes/runtime"),
+                &config.settings.active_theme_id,
+            )
+            .is_err()
+        {
             config.settings.active_theme_id = "default".into()
         }
         let next_auto =
@@ -734,7 +740,9 @@ impl Service {
         Ok(settings)
     }
     pub fn select_theme(&self, id: &str, expected_revision: u64) -> Result<Settings, ApiError> {
-        themes::get(&self.theme_dir, id)?;
+        if themes::builtin(id).is_none() {
+            crate::theme_package::installed(&self.theme_dir.join("runtime"), id)?;
+        }
         let mut d = self.data.lock().expect("service state");
         if expected_revision != d.config.settings.settings_revision {
             return Err(ApiError::new("CONFLICT", "设置已更新，请重新读取后再保存"));

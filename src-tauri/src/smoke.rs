@@ -40,7 +40,7 @@ fn io_error(error: ApiError) -> io::Error {
 
 pub fn prepare_data() -> Result<SmokeState, io::Error> {
     let temporary = tempfile::Builder::new()
-        .prefix("chatgpt-hud-smoke-")
+        .prefix("aide-monitor-smoke-")
         .tempdir()?;
     let source = temporary.path().join("source");
     let data_dir = temporary.path().join("hud");
@@ -68,6 +68,7 @@ pub fn prepare_data() -> Result<SmokeState, io::Error> {
 pub fn on_page_load(webview: &Webview<Wry>, payload: &tauri::webview::PageLoadPayload<'_>) {
     if !is_enabled()
         || is_interactive()
+        || crate::theme_smoke::enabled()
         || payload.event() != PageLoadEvent::Finished
         || !matches!(webview.label(), "hud" | "settings")
     {
@@ -271,7 +272,7 @@ const SCRIPT: &str = r#"
 
     const capabilities = await call('hud_v1_capabilities_get');
     assert(capabilities.transport === 'tauri', 'TRANSPORT_MISMATCH');
-    assert(capabilities.enabledMethods.length === (label === 'settings' ? 17 : 9), 'METHOD_COUNT_MISMATCH');
+    assert(capabilities.enabledMethods.length === (label === 'settings' ? 13 : 9), 'METHOD_COUNT_MISMATCH');
     const commonScopes = ['quota.read', 'quota.refresh', 'events.read', 'settings.read', 'themes.read', 'window.control'];
     const requiredScopes = label === 'settings' ? commonScopes.concat(['settings.write', 'themes.write', 'diagnostics.read']) : commonScopes;
     assert(requiredScopes.every(scope => capabilities.grantedScopes.includes(scope)), 'SCOPE_MISMATCH');
@@ -280,13 +281,13 @@ const SCRIPT: &str = r#"
     assert(settings.autoRefresh === false, 'ISOLATED_AUTO_REFRESH_NOT_DISABLED');
     const accounts = await call('hud_v1_accounts_list');
     assert(Array.isArray(accounts) && accounts.length === 0, 'ISOLATED_ACCOUNTS_NOT_EMPTY');
-    const snapshot = await call('hud_v1_quota_snapshot_get');
+    const snapshot = await call('aide_theme_data');
     assert(snapshot.accounts.length === 0 && snapshot.quotas.length === 0, 'ISOLATED_SNAPSHOT_NOT_EMPTY');
     assert(snapshot.source.state === 'ready', 'ISOLATED_SOURCE_NOT_READY');
     assert(snapshot.totalQuota.percent === null && snapshot.totalQuota.partial === false && snapshot.totalQuota.weeklyScalePercent === 15, 'TOTAL_QUOTA_CONTRACT_MISMATCH');
-    const themes = await call('hud_v1_themes_list');
+    const themes = await call('aide_theme_builtins');
     assert(Array.isArray(themes) && themes.some(theme => theme.id === 'paper'), 'BUILT_IN_THEMES_MISSING');
-    const theme = await call('hud_internal_theme_get');
+    const theme = await call('aide_theme_builtin');
     assert(theme && typeof theme.id === 'string', 'ACTIVE_THEME_MISSING');
     if (theme.id === 'default') assert(theme.tokens.colors.background === '#FAF6EC' && theme.tokens.colors.accent === '#39C5BB', 'CREAM_THEME_MISMATCH');
 
@@ -305,9 +306,9 @@ const SCRIPT: &str = r#"
         display:{privacyMode:true,alwaysOnTop:false}
       });
       assert(updated.refreshIntervalSeconds === 61 && updated.display.privacyMode === true && updated.autoRefresh === false, 'SETTINGS_UPDATE_NOT_APPLIED');
-      const beforeTheme = await call('hud_v1_settings_get');
-      await call('hud_v1_themes_select', {id:'paper', expectedRevision:beforeTheme.settingsRevision});
-      const activeTheme = await call('hud_internal_theme_get');
+      const selected = await window.__TAURI_INTERNALS__.invoke('aide_theme_select', {id:'paper'});
+      assert(selected.ok, 'THEME_SELECT_FAILED');
+      const activeTheme = await call('aide_theme_builtin');
       assert(activeTheme.id === 'paper', 'THEME_SELECT_NOT_APPLIED');
     } else {
       currentCheck = 'hud-write-ACL-rejection';

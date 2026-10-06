@@ -1,0 +1,117 @@
+{
+  "version": "0.4.0",
+  "rustTests": 68,
+  "nodeTests": 6,
+  "native": {
+    "appVersion": "0.4.0",
+    "elapsedMilliseconds": 2729,
+    "generatedAt": "2026-10-06T06:57:45.260538600+00:00",
+    "hudWindowLocked": true,
+    "isolatedSource": true,
+    "networkQueries": 0,
+    "ok": true,
+    "runtimeSettingsReopened": true,
+    "schemaVersion": 1,
+    "timedOut": false,
+    "trayPinRoundTrip": true,
+    "windows": {
+      "hud": {
+        "checks": [
+          "native-page-and-assets",
+          "hud_v1_capabilities_get",
+          "hud_v1_settings_get",
+          "hud_v1_accounts_list",
+          "aide_theme_data",
+          "aide_theme_builtins",
+          "aide_theme_builtin",
+          "hud-write-ACL-rejection",
+          "native-collapse-expand",
+          "hud_v1_window_control",
+          "runtime-settings-open",
+          "asset-and-CSP-check"
+        ],
+        "cspViolations": 0,
+        "demoVisible": false,
+        "label": "hud",
+        "methodCount": 9,
+        "nativeMain": true,
+        "ok": true,
+        "orbViewport": {
+          "contentHeight": 43,
+          "contentWidth": 43,
+          "height": 44,
+          "scale": 2.5,
+          "width": 44
+        },
+        "scopeCount": 6,
+        "viewport": {
+          "height": 88,
+          "width": 186
+        }
+      },
+      "settings": {
+        "checks": [
+          "native-page-and-assets",
+          "hud_v1_capabilities_get",
+          "hud_v1_settings_get",
+          "hud_v1_accounts_list",
+          "aide_theme_data",
+          "aide_theme_builtins",
+          "aide_theme_builtin",
+          "hud_internal_sources_get",
+          "hud_internal_startup",
+          "hud_v1_diagnostics_get",
+          "hud_v1_settings_get",
+          "hud_v1_settings_update",
+          "aide_theme_builtin",
+          "asset-and-CSP-check"
+        ],
+        "cspViolations": 0,
+        "demoVisible": false,
+        "label": "settings",
+        "methodCount": 13,
+        "nativeMain": true,
+        "ok": true,
+        "scopeCount": 9,
+        "viewport": {
+          "height": 620,
+          "width": 720
+        }
+      }
+    }
+  },
+  "themes": {
+    "activeUninstall": true,
+    "exampleReady": true,
+    "foldResume": true,
+    "isolatedSource": true,
+    "ok": true,
+    "realAccountQueries": 0,
+    "revokedRequestDenied": true,
+    "runtime": {
+      "checks": [
+        "sdk",
+        "isolated-browser-storage",
+        "selected-snapshot",
+        "storage",
+        "storage-remove",
+        "resize",
+        "raw-ipc-denied",
+        "external-fetch-denied",
+        "host-resources-denied",
+        "cross-theme-fetch-denied",
+        "external-navigation-denied",
+        "popup-denied",
+        "external-image-denied",
+        "host-csp-enforced",
+        "alternate-transports-disabled",
+        "unknown-method-denied",
+        "wrong-session-denied"
+      ],
+      "ok": true
+    },
+    "sessionRevoked": true,
+    "timeoutFallback": true,
+    "windowLocked": true
+  }
+}

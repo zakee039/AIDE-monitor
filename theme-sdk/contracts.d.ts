@@ -1,4 +1,4 @@
-/** V1 public contract. v0.1.0 implements Tauri IPC; HTTP/SSE remain planned. */
+/** AIDE theme API 1 data contract. Host-owned session transport. */
 export type UtcTime = string; // RFC 3339 UTC, validated at every transport boundary
 export type AccountId = string; // HUD-generated opaque ID, never an email/token
 export type Scope =
@@ -23,7 +23,9 @@ export interface ApiError {
 }
 
 export interface EnvelopeMeta {
-  apiVersion: "1.0";
+  apiVersion: "1";
+  sessionId: string;
+  sequence: number;
   instanceId: string; // new UUID each process start
   revision: number; // monotonic safe integer within instance; never epoch time
   requestId: string;
@@ -120,92 +122,4 @@ export interface RefreshJob {
     state: "queued" | "running" | "succeeded" | "failed" | "cancelled";
     error: ApiError | null;
   }>;
-}
-
-export interface DisplaySettings {
-  alwaysOnTop: boolean;
-  showHoverDetails: boolean;
-  privacyMode: boolean;
-  locale: "system" | "zh-CN" | "en";
-}
-export interface Settings {
-  settingsRevision: number;
-  refreshIntervalSeconds: number;
-  autoRefresh: boolean;
-  display: DisplaySettings;
-  activeThemeId: string;
-}
-export interface SettingsPatch {
-  expectedRevision: number;
-  refreshIntervalSeconds?: number;
-  autoRefresh?: boolean;
-  display?: Partial<DisplaySettings>;
-}
-export interface AccountSelectionPatch {
-  expectedRevision: number;
-  accountIds: AccountId[]; // unique ordered selection; full replacement
-  aliases?: Record<AccountId, string>; // local presentation only
-}
-
-export interface ThemeSummary { id: string; name: string; builtIn: boolean }
-export interface ThemeValidation {
-  valid: boolean;
-  issues: Array<{ path: string; code: string; message: string }>;
-}
-export interface Diagnostics {
-  appVersion: string;
-  adapterVersion: string;
-  source: SourceStatus;
-  selectedAccountCount: number;
-  activeJobCount: number;
-  recentErrorCodes: ErrorCode[];
-}
-export interface Capabilities {
-  appVersion: string;
-  apiVersion: "1.0";
-  transport: "tauri" | "http";
-  enabledMethods: string[];
-  grantedScopes: Scope[];
-  themeSchemaVersions: number[];
-  providerIds: string[];
-  maxRefreshAccounts: number;
-}
-
-/** Logical methods, not literal Tauri command names or HTTP routes. */
-export interface MethodMap {
-  "capabilities.get": { params: Record<string, never>; result: Capabilities };
-  "accounts.alias.update": { params: { accountId: string; alias: string }; result: Settings };
-  "accounts.list": { params: Record<string, never>; result: AccountSummary[] };
-  "accounts.selection.update": { params: AccountSelectionPatch; result: Settings };
-  "quota.snapshot.get": { params: Record<string, never>; result: Snapshot };
-  "recommendation.get": { params: Record<string, never>; result: Recommendation };
-  "refresh.request": { params: RefreshRequest; result: RefreshTicket };
-  "refresh.status.get": { params: { jobId: string }; result: RefreshJob };
-  "settings.get": { params: Record<string, never>; result: Settings };
-  "settings.update": { params: SettingsPatch; result: Settings };
-  "themes.list": { params: Record<string, never>; result: ThemeSummary[] };
-  "window.control": { params: { action: "show" | "hide" | "restore_position" | "open_settings" }; result: { accepted: boolean } };
-  "diagnostics.get": { params: Record<string, never>; result: Diagnostics };
-}
-
-export type EventName =
-  | "snapshot.changed" | "refresh.progress" | "refresh.completed"
-  | "source.changed" | "settings.changed" | "theme.changed" | "resync.required";
-export interface HudEvent {
-  apiVersion: "1.0";
-  instanceId: string;
-  revision: number;
-  sequence: number;
-  emittedAt: UtcTime;
-  type: EventName;
-  data: { jobId?: string }; // invalidation notifications; authoritative data via get
-}
-
-/** SDK shape only. A real implementation must validate JSON and enforce capabilities. */
-export interface HudClient {
-  call<M extends keyof MethodMap>(
-    method: M,
-    params: MethodMap[M]["params"],
-  ): Promise<ApiResult<MethodMap[M]["result"]>>;
-  subscribe(listener: (event: HudEvent) => void): Promise<() => void>;
 }

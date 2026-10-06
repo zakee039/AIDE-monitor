@@ -3,6 +3,13 @@ import { cloneElement, isValidElement, type ReactNode } from "react";
 let language = "en";
 export function setLanguage(locale: string) { language = locale; }
 const en: Record<string, string> = {
+  "保留三套内置主题，也可安装独立的 Widget 界面。":"Choose a built-in theme or install a custom widget.",
+  "正在加载主题，失败时会自动恢复。":"Loading theme. The previous interface will recover if loading fails.",
+  "重新加载":"Reload", "卸载":"Uninstall", "安装 Widget 主题":"Install a widget theme",
+  "选择 .aidetheme 包，所有资源须包含在包内。":"Choose an .aidetheme package containing all of its assets.",
+  "安装主题":"Install theme", "卸载时清理主题偏好":"Clear theme preferences when uninstalling",
+  "主题通过受限 API 读取已选择账号，不允许任意联网。加载失败可从托盘恢复内置主题。":"Themes can read selected accounts through a restricted API. External network access is blocked. Restore a built-in theme from the tray if needed.",
+
   "gemini额度": "Gemini quota",
   "开机自启":"Launch at startup", "选择源":"Select sources", "选择数据源":"Data sources", "官方客户端":"Official client", "未检测到目录":"No folder detected", "本地账号导出 JSON":"Local account export JSON", "OAuth 登录账号":"OAuth sign-in accounts", "保存并扫描":"Save & scan", "数据源已保存并扫描。":"Sources saved and scanned.",
   "折叠悬浮窗": "Collapse HUD", "展开悬浮窗": "Expand HUD", "估算总额度": "Estimated total quota", "部分账号数据不可用": "Some account data is unavailable",

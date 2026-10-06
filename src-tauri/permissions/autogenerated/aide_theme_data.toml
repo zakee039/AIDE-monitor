@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-aide-theme-data"
+description = "Enables the aide_theme_data command without any pre-configured scope."
+commands.allow = ["aide_theme_data"]
+
+[[permission]]
+identifier = "deny-aide-theme-data"
+description = "Denies the aide_theme_data command without any pre-configured scope."
+commands.deny = ["aide_theme_data"]
