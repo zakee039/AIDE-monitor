@@ -1,6 +1,16 @@
 # AIDE monitor
 
-## AIDE monitor 0.3.0
+## AIDE monitor 0.3.1
+
+- 悬浮窗及圆球右键菜单：刷新额度、展开/收起、隐藏、退出。
+- 禁止最大化与边缘缩放，保留内容自适应和展开/收起。
+- Antigravity 使用汇总接口，保留 Gemini / Claude 的 5h 与周额度；内置主题显示 Gemini 两组额度并与 Codex 对齐。
+- 修复账号列表右侧输入框对齐，保留三套内置主题。
+- 更新第三方主题系统规划；可执行主题运行时尚未实现。
+
+[版本说明](docs/releases/v0.3.1.md) · [GitHub 标签](https://github.com/zakee039/chatgpt-HUD/releases/tag/v0.3.1)
+
+## AIDE monitor 0.3.0（历史版本）
 
 已更名为 **AIDE monitor**：#39C5BB 的 M 标志搭配两侧发箍。新增 Windows 开机自启开关、精简设置页、平台图标和多数据源选择弹窗。
 

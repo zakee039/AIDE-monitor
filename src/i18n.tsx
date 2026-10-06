@@ -3,6 +3,7 @@ import { cloneElement, isValidElement, type ReactNode } from "react";
 let language = "en";
 export function setLanguage(locale: string) { language = locale; }
 const en: Record<string, string> = {
+  "gemini额度": "Gemini quota",
   "开机自启":"Launch at startup", "选择源":"Select sources", "选择数据源":"Data sources", "官方客户端":"Official client", "未检测到目录":"No folder detected", "本地账号导出 JSON":"Local account export JSON", "OAuth 登录账号":"OAuth sign-in accounts", "保存并扫描":"Save & scan", "数据源已保存并扫描。":"Sources saved and scanned.",
   "折叠悬浮窗": "Collapse HUD", "展开悬浮窗": "Expand HUD", "估算总额度": "Estimated total quota", "部分账号数据不可用": "Some account data is unavailable",
   "设置分区": "Settings sections", "浏览器演示 · 虚构账号": "Browser demo · Sample accounts",

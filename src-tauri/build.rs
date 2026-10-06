@@ -37,6 +37,7 @@ fn main() {
         "hud_internal_source_rescan",
         "hud_internal_theme_get",
         "hud_internal_window_layout",
+        "aide_hud_context_menu",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

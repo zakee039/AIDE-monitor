@@ -17,9 +17,9 @@ pub fn request(client: &Client, c: &Credentials) -> Result<RequestBuilder, ApiEr
             .header("anthropic-beta", "oauth-2025-04-20"),
         "antigravity" => client
             .post(if c.gcp {
-                "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels"
+                "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
             } else {
-                "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels"
+                "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
             })
             .json(
                 &c.project_id
@@ -129,20 +129,63 @@ pub fn parse(
             }
         }
         "antigravity" => {
-            if let Some(models) = v.get("models").and_then(Value::as_object) {
-                for (key, m) in models.iter().take(100) {
-                    if let Some(q) = m.get("quotaInfo") {
-                        windows.push(window(
-                            key,
-                            m.get("displayName").and_then(Value::as_str).unwrap_or(key),
-                            &format!("feature:{key}"),
-                            q.get("remainingFraction")
-                                .and_then(Value::as_f64)
-                                .map(|f| f * 100.0),
-                            date(q.get("resetTime")),
-                            None,
-                        ));
+            let groups = v
+                .get("groups")
+                .and_then(Value::as_array)
+                .ok_or_else(|| ApiError::new("RESPONSE_UNSUPPORTED", "未返回额度汇总"))?;
+            let buckets: Vec<&Value> = groups
+                .iter()
+                .filter_map(|g| g.get("buckets").and_then(Value::as_array))
+                .flatten()
+                .collect();
+            for (family, label, aliases) in [
+                ("gemini", "Gemini", ["gemini", "gemini"]),
+                ("claude", "Claude", ["3p", "claude"]),
+            ] {
+                for (period, duration) in [("5h", 18000), ("weekly", 604800)] {
+                    let matching: Vec<_> = buckets
+                        .iter()
+                        .filter(|b| {
+                            b.get("bucketId").and_then(Value::as_str).is_some_and(|id| {
+                                aliases.iter().any(|prefix| {
+                                    id == format!("{prefix}-{period}")
+                                        || id == format!("{prefix}:{period}")
+                                })
+                            })
+                        })
+                        .collect();
+                    let values: Option<Vec<f64>> = matching
+                        .iter()
+                        .map(|b| {
+                            percent(
+                                b.get("remainingFraction")
+                                    .and_then(Value::as_f64)
+                                    .map(|f| f * 100.0),
+                            )
+                        })
+                        .collect();
+                    let remaining = values.and_then(|v| v.into_iter().reduce(f64::min));
+                    let dates: Option<Vec<String>> =
+                        matching.iter().map(|b| date(b.get("resetTime"))).collect();
+                    let reset = dates.and_then(|v| {
+                        v.into_iter()
+                            .max_by_key(|d| DateTime::parse_from_rfc3339(d).ok())
+                    });
+                    let mut w = window(
+                        &format!("{family}-{period}"),
+                        &format!("{label} {period}"),
+                        &format!("feature:{family}"),
+                        remaining,
+                        reset,
+                        Some(duration),
+                    );
+                    w.kind = if period == "weekly" {
+                        "secondary"
+                    } else {
+                        "primary"
                     }
+                    .into();
+                    windows.push(w);
                 }
             }
         }
@@ -224,20 +267,40 @@ pub fn parse(
 mod tests {
     use super::*;
     #[test]
-    fn provider_measurements_are_not_invented() {
-        let q=parse(&json!({"five_hour":{"utilization":23.5,"resets_at":"2026-10-06T00:00:00Z"},"seven_day":{"utilization":100}}),"claude","a",Utc::now()).unwrap();
-        assert_eq!(q.windows[0].remaining_percent, Some(76.5));
-        assert_eq!(q.provider_allowed, Some(false));
+    fn antigravity_preserves_family_and_period() {
+        let q = parse(&json!({"groups":[{"buckets":[
+            {"bucketId":"gemini-5h","remainingFraction":1,"resetTime":"2026-10-06T15:36:00Z"},
+            {"bucketId":"gemini-weekly","remainingFraction":0.96,"resetTime":"2026-10-07T14:00:00Z"},
+            {"bucketId":"3p-5h","remainingFraction":0.8},
+            {"bucketId":"claude:weekly","remainingFraction":0.4},
+            {"bucketId":"chat_123","remainingFraction":0}
+        ]}]}), "antigravity", "a", Utc::now()).unwrap();
+        assert_eq!(q.windows.len(), 4);
+        assert_eq!(q.windows[0].remaining_percent, Some(100.0));
+        assert_eq!(q.windows[1].remaining_percent, Some(96.0));
+        assert_eq!(q.windows[1].duration_seconds, Some(604800));
+        assert_eq!(
+            q.windows[1].resets_at.as_deref(),
+            Some("2026-10-07T14:00:00+00:00")
+        );
+        assert_eq!(q.windows[2].remaining_percent, Some(80.0));
+        assert_eq!(q.windows[3].remaining_percent, Some(40.0));
+        assert!(!q.base_coverage_complete);
         let q = parse(
-            &json!({"models":{"a":{"quotaInfo":{"remainingFraction":0.2}},"b":{"quotaInfo":{}}}}),
+            &json!({"groups":[{"buckets":[{"bucketId":"gemini:5h","remainingFraction":2}]}]}),
             "antigravity",
             "a",
             Utc::now(),
         )
         .unwrap();
-        assert_eq!(q.windows[0].remaining_percent, Some(20.0));
-        assert_eq!(q.windows[1].remaining_percent, None);
-        assert!(!q.base_coverage_complete);
+        assert!(q.windows.iter().all(|w| w.remaining_percent.is_none()));
+        assert!(parse(&json!({"models":{}}), "antigravity", "a", Utc::now()).is_err());
+    }
+    #[test]
+    fn provider_measurements_are_not_invented() {
+        let q=parse(&json!({"five_hour":{"utilization":23.5,"resets_at":"2026-10-06T00:00:00Z"},"seven_day":{"utilization":100}}),"claude","a",Utc::now()).unwrap();
+        assert_eq!(q.windows[0].remaining_percent, Some(76.5));
+        assert_eq!(q.provider_allowed, Some(false));
         let q = parse(
             &json!({"config":{"weeklyCredits":{"total":{"val":100},"remaining":{"val":75}}}}),
             "grok",

@@ -1,6 +1,6 @@
 [package]
 name = "aide-monitor"
-version = "0.3.0"
+version = "0.3.1"
 description = "AIDE monitor — multi-platform AI quota monitor"
 edition = "2021"
 publish = false

@@ -378,7 +378,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline-color:
 .alias-editor > span { color: var(--text-muted); font-size: 12px; }
 .selection-row { gap: 12px; }
 .selection-row > label { min-width: 0; flex: 1; }
-.selection-row:not(.chosen) .alias-editor { margin-right: 68px; }
+.order-actions { flex-shrink: 0; }
+.order-placeholder { visibility: hidden; pointer-events: none; }
 .selection-identity { min-width: 0; }
 .selection-identity strong { overflow: hidden; text-overflow: ellipsis; }
 .settings-card-heading > .text-button { margin-left: auto; flex-shrink: 0; }

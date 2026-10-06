@@ -6,7 +6,7 @@ commands.allow = ["hud_v1_capabilities_get", "hud_v1_accounts_list", "hud_v1_quo
 [[permission]]
 identifier = "hud-actions"
 description = "Refresh selected accounts and control trusted windows"
-commands.allow = ["hud_v1_refresh_request", "hud_v1_window_control", "hud_internal_window_layout"]
+commands.allow = ["hud_v1_refresh_request", "hud_v1_window_control", "hud_internal_window_layout", "aide_hud_context_menu"]
 
 [[permission]]
 identifier = "settings-actions"

@@ -14,7 +14,7 @@ use service::Service;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 use tauri_plugin_dialog::DialogExt;
 
@@ -720,6 +720,51 @@ struct HudLayoutState(std::sync::Mutex<HudLayout>);
 
 const HUD_ORB_SIZE: f64 = 43.0;
 
+#[tauri::command]
+fn aide_hud_context_menu(
+    window: WebviewWindow,
+    service: State<'_, Service>,
+    layout: State<'_, HudLayoutState>,
+) -> Result<(), String> {
+    if window.label() != "hud" {
+        return Err("FORBIDDEN".into());
+    }
+    let zh = service.settings().display.locale == "zh-CN";
+    let collapsed = layout.0.lock().map_err(|_| "INTERNAL_ERROR")?.collapsed;
+    let app = window.app_handle();
+    let labels = [
+        (
+            "aide-refresh",
+            if zh { "刷新额度" } else { "Refresh quota" },
+        ),
+        (
+            "aide-toggle",
+            if collapsed {
+                if zh {
+                    "展开"
+                } else {
+                    "Expand"
+                }
+            } else if zh {
+                "收起"
+            } else {
+                "Collapse"
+            },
+        ),
+        ("aide-hide", if zh { "隐藏" } else { "Hide" }),
+        ("aide-quit", if zh { "退出" } else { "Quit" }),
+    ];
+    let items: Vec<_> = labels
+        .into_iter()
+        .map(|(id, label)| MenuItem::with_id(app, id, label, true, None::<&str>))
+        .collect::<tauri::Result<_>>()
+        .map_err(|_| "MENU_ERROR")?;
+    let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+        items.iter().map(|item| item as _).collect();
+    let menu = Menu::with_items(app, &refs).map_err(|_| "MENU_ERROR")?;
+    window.popup_menu(&menu).map_err(|_| "MENU_ERROR".into())
+}
+
 #[derive(Default)]
 struct HudLayout {
     collapsed: bool,
@@ -772,7 +817,7 @@ async fn hud_internal_window_layout(
             .map_err(|_| ApiError::new("INTERNAL_ERROR", "无法读取显示缩放"))?;
         window
             .set_size(tauri::LogicalSize::new(request.width, request.height))
-            .and_then(|_| window.set_resizable(!request.collapsed))
+            .and_then(|_| window.set_resizable(false))
             .map_err(|_| ApiError::new("INTERNAL_ERROR", "无法调整悬浮窗"))?;
         if layout.collapsed != request.collapsed {
             // Keep the right edge in place when the far-right fold control is used.
@@ -816,6 +861,26 @@ pub fn run() {
     }
     tauri::Builder::default()
         .manage(HudLayoutState::default())
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "aide-refresh" => {
+                let _ = app
+                    .state::<Service>()
+                    .refresh(RefreshRequest { account_ids: None });
+            }
+            "aide-toggle" => {
+                if let Some(hud) = app.get_webview_window("hud") {
+                    let _ = hud.emit("aide://toggle-collapse", ());
+                }
+            }
+            "aide-hide" => {
+                let _ = window_action(app, "hide");
+            }
+            "aide-quit" => {
+                app.state::<Service>().flush_position();
+                app.exit(0);
+            }
+            _ => {}
+        })
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             let _ = window_action(app, "show");
         }))
@@ -849,7 +914,8 @@ pub fn run() {
             hud_internal_source_choose,
             hud_internal_source_rescan,
             hud_internal_theme_get,
-            hud_internal_window_layout
+            hud_internal_window_layout,
+            aide_hud_context_menu
         ])
         .setup(|app| {
             if smoke::is_enabled() {

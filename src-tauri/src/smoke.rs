@@ -198,6 +198,11 @@ pub fn start_poll(app: &AppHandle) {
                 let ok = !timed_out
                     && reopened
                     && pin_round_trip
+                    && app.get_webview_window("hud").is_some_and(|w| {
+                        w.is_resizable().ok() == Some(false)
+                            && w.is_maximizable().ok() == Some(false)
+                            && w.is_maximized().ok() == Some(false)
+                    })
                     && ["hud", "settings"].iter().all(|label| {
                         current.get(*label).and_then(|value| value.get("ok"))
                             == Some(&Value::Bool(true))
@@ -212,6 +217,10 @@ pub fn start_poll(app: &AppHandle) {
                     "timedOut":timed_out,
                     "runtimeSettingsReopened":reopened,
                     "trayPinRoundTrip":pin_round_trip,
+                    "hudWindowLocked": app.get_webview_window("hud").is_some_and(|w|
+                        w.is_resizable().ok() == Some(false)
+                        && w.is_maximizable().ok() == Some(false)
+                        && w.is_maximized().ok() == Some(false)),
                     "elapsedMilliseconds":started.elapsed().as_millis(),
                     "windows":current,
                 });

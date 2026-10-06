@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AIDE monitor — API reference</title>
 <style>body{margin:0;background:#faf6ec;color:#293b38;font:16px/1.7 system-ui,sans-serif}main{max-width:1040px;margin:40px auto;padding:24px}a{color:#237b74}h1{font-size:38px}h2{margin-top:38px}code,pre{font-family:Consolas,monospace;background:#eeeee4;border-radius:5px}code{padding:2px 5px}pre{padding:20px;overflow:auto}table{border-collapse:collapse;width:100%;background:#fffdf6}td,th{text-align:left;padding:13px;border-bottom:1px solid #dedfd4;vertical-align:top}header{border-top:4px solid #39c5bb}.tag{color:#25786e}small{color:#63736e}button{float:right;padding:8px 16px;border:1px solid #abc0b6;background:#f3fcf5;border-radius:7px;cursor:pointer}[hidden]{display:none}</style>
-<main><header><button onclick="setLanguage(document.documentElement.lang==='en'?'zh-CN':'en')">English / 中文</button><p class="tag">AIDE monitor · 0.3.0 · API 1.0</p><h1>API reference <small>/ 接口说明</small></h1></header>
-<p data-en>These methods are available to the app's trusted Tauri windows. Version 0.3.0 does not expose an HTTP server or grant external webpages access. Themes are validated JSON data, not executable plugins.</p>
-<p data-zh hidden>这些方法通过应用内 Tauri 接口向受信任窗口提供。0.3.0 尚未开放 HTTP 服务，外部网页不能直接调用。主题为经过校验的 JSON 数据，不执行插件代码。</p>
+<main><header><button onclick="setLanguage(document.documentElement.lang==='en'?'zh-CN':'en')">English / 中文</button><p class="tag">AIDE monitor · 0.3.1 · API 1.0</p><h1>API reference <small>/ 接口说明</small></h1></header>
+<p data-en>These methods are available to the app's trusted Tauri windows. Version 0.3.1 does not expose an HTTP server or grant external webpages access. Themes are validated JSON data, not executable plugins.</p>
+<p data-zh hidden>这些方法通过应用内 Tauri 接口向受信任窗口提供。0.3.1 尚未开放 HTTP 服务，外部网页不能直接调用。主题为经过校验的 JSON 数据，不执行插件代码。</p>
 <h2>Call a method / 调用方法</h2><pre>import { invoke } from '@tauri-apps/api/core';
 const result = await invoke('hud_v1_quota_snapshot_get', { request: {} });
 if (result.ok) console.log(result.data.recommendation);
