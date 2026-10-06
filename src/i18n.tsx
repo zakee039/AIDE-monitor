@@ -3,6 +3,20 @@ import { cloneElement, isValidElement, type ReactNode } from "react";
 let language = "en";
 export function setLanguage(locale: string) { language = locale; }
 const en: Record<string, string> = {
+  "悬浮窗额度显示": "Floating quota display",
+  "悬浮窗额度": "Floating quota",
+  "请先添加账号": "Add an account first",
+  "只累计所选平台中已勾选的账号。Antigravity 使用 Gemini 额度池。": "Only selected accounts on this platform count. Antigravity uses the Gemini pool.",
+  "订阅额度换算（估算）": "Subscription conversion (estimated)",
+  "自动读取订阅；未返回订阅时暂按基础档估算，无法识别的档位不累计。可在此指定档位。": "Reads the plan when available. Missing plans use the base tier; unrecognized tiers are excluded. Override the tier here.",
+  "百分比表示一份完整 5h 额度对应的周额度。Ultra 的 25% 为占位值；Grok 高级档请自定义倍率。": "The percentage is the weekly share of one full 5h allowance. Ultra's 25% is provisional; set custom multipliers for higher Grok tiers.",
+  "订阅档位": "Subscription tier",
+  "自动（未返回订阅时按基础档）": "Auto (base tier if absent)",
+  "自定义": "Custom",
+  "额度倍率": "Capacity multiplier",
+  "5h 对应周额度 (%)": "Weekly share per 5h (%)",
+  "保存": "Save",
+  "按基础档估算": "Estimated using base tier",
   "代理": "Proxy", "系统": "System", "代理地址设置": "Proxy profiles", "添加代理": "Add proxy", "代理名称": "Proxy name", "代理地址": "Proxy address", "删除代理": "Delete proxy", "名称，如腾讯云": "Name, e.g. Tencent Cloud",
   "每行一组，输入即保存。在账号页选择代理，默认使用系统设置。": "One profile per row, saved as you type. Assign it to an account; System is the default.",
   "支持 HTTP、HTTPS、SOCKS5。删除代理后，关联账号恢复为系统设置。": "Supports HTTP, HTTPS and SOCKS5. Removing a profile returns its accounts to System.",

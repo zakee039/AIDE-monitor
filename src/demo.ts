@@ -1,3 +1,4 @@
+import { quotaProvider, selectedQuotaProvider } from "./QuotaSettings";
 import type { AccountQuota, AccountSummary, ApiResult, HudEvent, MethodMap, RefreshJob, Settings, Snapshot, SourceStatus, ThemeSummary, ThemeValidation } from "../contracts/hud-api";
 import { defaultTheme, midnightTheme, paperTheme, type ThemeDocument } from "./themes";
 
@@ -120,18 +121,31 @@ export function demoSnapshot(): Snapshot {
   });
   const available = selected.find(account => availability.find(item => item.accountId === account.id)?.state === "now");
   const waiting = availability.filter(item => item.state === "waiting").sort((a, b) => Date.parse(a.estimatedAvailableAt!) - Date.parse(b.estimatedAvailableAt!))[0];
-  const contributions = quotas.flatMap(quota => {
-    if (!["codex", "codex_usage"].includes(selected.find(a => a.id === quota.accountId)?.providerId ?? "") || availability.find(item => item.accountId === quota.accountId)?.state === "unknown") return [];
-    const week = quota.windows.find(window => window.applicability === "required" && window.durationSeconds === 604800)?.remainingPercent;
-    const five = quota.windows.find(window => window.applicability === "required" && window.durationSeconds === 18000)?.remainingPercent;
-    return week == null ? [] : [five == null ? week : five * Math.min(week / 15, 1)];
+  const providerId = selectedQuotaProvider(settings, accounts) || "chatgpt";
+  const own = selected.filter(a => quotaProvider(a.providerId) === providerId);
+  const ownQuotas = quotas.filter(q => own.some(a => a.id === q.accountId));
+  const baseRatio = providerId === "antigravity" ? 0.25 : 0.15;
+  const hasFive = ownQuotas.some(q => q.windows.some(w => w.durationSeconds === 18000));
+  const contributions = ownQuotas.flatMap(quota => {
+    if (availability.find(item => item.accountId === quota.accountId)?.state === "unknown") return [];
+    const windows = quota.windows.filter(w => providerId === "antigravity" ? w.scope === "feature:gemini" : w.scope === "base");
+    const week = windows.find(w => w.durationSeconds === 604800)?.remainingPercent;
+    const five = windows.find(w => w.durationSeconds === 18000)?.remainingPercent;
+    const profile = settings.display.quotaProfiles?.[quota.accountId] ?? "";
+    const custom = profile.split(":");
+    const multiplier = profile.startsWith("custom:") ? +custom[1] : ({ pro5x: 5, pro10x: 10, pro20x: 20, max5x: 5, max20x: 20, ultra5x: 5 } as Record<string, number>)[profile] ?? 1;
+    const ratio = profile.startsWith("custom:") ? +custom[2] / 100 : profile === "max5x" ? 0.1 : profile === "max20x" ? 0.2 : baseRatio;
+    return week == null ? [] : [five == null ? week * multiplier / (hasFive ? baseRatio : 1) : five < 5 || week < 2 ? 0 : multiplier * Math.min(five, week / ratio)];
   });
+  const ownAvailable = own.find(a => availability.some(v => v.accountId === a.id && v.state === "now"));
+  const ownWaiting = availability.filter(v => own.some(a => a.id === v.accountId) && v.state === "waiting").sort((a,b) => Date.parse(a.estimatedAvailableAt!) - Date.parse(b.estimatedAvailableAt!))[0];
+  const ownRecommendation: Snapshot["recommendation"] = { state: ownAvailable ? "now" : ownWaiting ? "waiting" : own.length ? "unknown" : "empty", accountId: ownAvailable?.id ?? ownWaiting?.accountId ?? null, estimatedAvailableAt: ownAvailable ? null : ownWaiting?.estimatedAvailableAt ?? null, reason: "provider_quota", coverage: { selected: own.length, known: contributions.length, unknown: own.length - contributions.length, complete: own.length === contributions.length } };
   return {
     source,
     accounts: selected, quotas,
     availability,
     recommendation: { state: available ? "now" : waiting ? "waiting" : selected.length ? "unknown" : "empty", accountId: available?.id ?? waiting?.accountId ?? null, estimatedAvailableAt: available ? null : waiting?.estimatedAvailableAt ?? null, reason: available ? "available" : waiting ? "earliest_available" : "no_data", coverage: { selected: selected.length, known: contributions.length, unknown: selected.length - contributions.length, complete: contributions.length === selected.length } },
-    totalQuota: { percent: contributions.length ? contributions.reduce((a, b) => a + b, 0) : null, partial: scenario === "orb-partial" || contributions.length < selected.length, weeklyScalePercent: 15 },
+    totalQuota: { percent: contributions.length ? contributions.reduce((a, b) => a + b, 0) : null, partial: scenario === "orb-partial" || contributions.length < own.length, weeklyScalePercent: baseRatio * 100, providerId, recommendation: ownRecommendation, estimated: true },
     nextRefreshAt: settings.autoRefresh ? new Date(Date.now() + settings.refreshIntervalSeconds * 1000).toISOString() : null,
   };
 }
@@ -143,7 +157,7 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
   let response: ApiResult<unknown>;
   if (["settings.update", "accounts.selection.update"].includes(method) && request.expectedRevision !== settings.settingsRevision) return fail("CONFLICT", "设置已更新，请重试。") as ApiResult<MethodMap[M]["result"]>;
   switch (method) {
-    case "capabilities.get": response = result({ appVersion: "0.5.1", apiVersion: "1.0", transport: "tauri", enabledMethods: methods, grantedScopes: ["quota.read", "quota.refresh", "events.read", "settings.read", "settings.write", "themes.read", "themes.write", "window.control", "diagnostics.read"], themeSchemaVersions: [1], providerIds: ["codex"], maxRefreshAccounts: 100 }); break;
+    case "capabilities.get": response = result({ appVersion: "0.5.2", apiVersion: "1.0", transport: "tauri", enabledMethods: methods, grantedScopes: ["quota.read", "quota.refresh", "events.read", "settings.read", "settings.write", "themes.read", "themes.write", "window.control", "diagnostics.read"], themeSchemaVersions: [1], providerIds: ["codex"], maxRefreshAccounts: 100 }); break;
     case "accounts.list": response = result(accounts.map((account, index) => ({ ...account, displayName: settings.display.privacyMode ? `${settings.display.locale === "zh-CN" ? "账号" : "Account"} ${index + 1}` : account.displayName }))); break;
     case "quota.snapshot.get": response = result(demoSnapshot()); break;
     case "recommendation.get": response = result(demoSnapshot().recommendation); break;
@@ -185,7 +199,7 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
       settings.settingsRevision++; emit("snapshot.changed"); response = result(settings); break;
     }
     case "window.control": response = result({ accepted: true }); break;
-    case "diagnostics.get": response = result({ appVersion: "0.5.1", adapterVersion: "演示", source, selectedAccountCount: accounts.filter(account => account.selected).length, activeJobCount: refreshing ? 1 : 0, recentErrorCodes: [] }); break;
+    case "diagnostics.get": response = result({ appVersion: "0.5.2", adapterVersion: "演示", source, selectedAccountCount: accounts.filter(account => account.selected).length, activeJobCount: refreshing ? 1 : 0, recentErrorCodes: [] }); break;
     default: response = fail("INVALID_ARGUMENT", "此功能尚未提供。");
   }
   return response as ApiResult<MethodMap[M]["result"]>;
@@ -197,7 +211,7 @@ export async function demoInternal(method: string, request: object): Promise<Api
   switch (method) {
     case "startup": { const v = (request as { enabled?: boolean }).enabled; if (v !== undefined) demoStartup = v; return result({ enabled: demoStartup }); }
     case "sources_get": return result(demoSources);
-    case "sources_save": demoSources = (request as { sources: typeof demoSources }).sources; return result({ state: "ready", format: "unknown", adapterVersion: "0.5.1", error: null });
+    case "sources_save": demoSources = (request as { sources: typeof demoSources }).sources; return result({ state: "ready", format: "unknown", adapterVersion: "0.5.2", error: null });
     case "sources_pick": return result({ path: "C:/Demo/Accounts" });
     case "source_get": return result({ path: "浏览器演示 · 虚构账号" });
     case "source_choose": emit("source.changed"); return result({ cancelled: false, path: "浏览器演示 · 虚构账号", source });

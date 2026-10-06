@@ -527,7 +527,11 @@ impl Service {
             .map(|q| domain::evaluate(q, now))
             .collect::<Vec<_>>();
         let recommendation = domain::recommend(&accounts, &availability, &quotas);
-        let total_quota = domain::total_quota(&accounts, &quotas, now);
+        let mut display = d.config.settings.display.clone();
+        let all_accounts: Vec<_> = d.accounts.iter().map(|a| a.summary.clone()).collect();
+        display.quota_provider =
+            crate::quota_total::effective_provider(&display.quota_provider, &all_accounts).into();
+        let total_quota = crate::quota_total::calculate(&accounts, &quotas, now, &display);
         Snapshot {
             source: d.source.clone(),
             accounts,
@@ -777,6 +781,31 @@ impl Service {
             config.settings.auto_refresh = enabled;
         }
         if let Some(display) = patch.display {
+            if let Some(v) = display.quota_provider {
+                if !crate::quota_total::PROVIDERS.contains(&v.as_str())
+                    || !d
+                        .accounts
+                        .iter()
+                        .any(|a| crate::quota_total::provider(&a.summary.provider_id) == v)
+                {
+                    return Err(ApiError::new("INVALID_ARGUMENT", "请选择已有账号的平台"));
+                }
+                config.settings.display.quota_provider = v;
+            }
+            if let Some(profiles) = display.quota_profiles {
+                if profiles.iter().any(|(id, value)| {
+                    !d.accounts.iter().any(|a| {
+                        a.summary.id == *id
+                            && crate::quota_total::valid_profile(
+                                crate::quota_total::provider(&a.summary.provider_id),
+                                value,
+                            )
+                    })
+                }) {
+                    return Err(ApiError::new("INVALID_ARGUMENT", "订阅换算设置无效"));
+                }
+                config.settings.display.quota_profiles = profiles;
+            }
             if let Some(v) = display.position_locked {
                 config.settings.display.position_locked = v;
             }
@@ -1918,7 +1947,7 @@ mod tests {
         let rev = service.settings().settings_revision;
         let patch: SettingsPatch = serde_json::from_value(serde_json::json!({
             "expectedRevision": rev, "accountRefresh": {id.clone(): 900},
-            "display": {"positionLocked": true},
+            "display": {"positionLocked": true, "quotaProvider":"chatgpt", "quotaProfiles": {id.clone(): "pro10x"}},
             "usbDisplay": {"enabled": true,"deviceId":"monitor-interface-A","themeId":"paper"}
         }))
         .unwrap();
@@ -1926,6 +1955,13 @@ mod tests {
         assert_eq!(saved.account_interval(&id), Some(900));
         let loaded = crate::config::load(&service.config_path).unwrap().settings;
         assert!(loaded.display.position_locked);
+        assert_eq!(loaded.display.quota_provider, "chatgpt");
+        assert_eq!(
+            loaded.display.quota_profiles.get(&id).map(String::as_str),
+            Some("pro10x")
+        );
+        assert!(service.update_settings(serde_json::from_value(serde_json::json!({"expectedRevision":saved.settings_revision,"display":{"quotaProvider":"claude"}})).unwrap()).is_err());
+        assert!(service.update_settings(serde_json::from_value(serde_json::json!({"expectedRevision":saved.settings_revision,"display":{"quotaProfiles":{id.clone():"custom:1:0"}}})).unwrap()).is_err());
         assert_eq!(loaded.usb_display.device_id, "monitor-interface-A");
         assert_eq!(loaded.account_interval(&id), Some(900));
         let inherited = service.update_settings(serde_json::from_value(serde_json::json!({"expectedRevision":saved.settings_revision,"accountRefresh":{}})).unwrap()).unwrap();

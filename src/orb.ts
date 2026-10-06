@@ -1,11 +1,12 @@
 import type { Snapshot } from "../contracts/hud-api.ts";
 
-/** Use the same recommendation as the expanded footer; aggregate coverage is unrelated. */
+/** The orb countdown follows its selected provider, independently of the expanded footer. */
 export function orbDisplay(snapshot: Pick<Snapshot, "totalQuota" | "recommendation">, now: number) {
   const percent = snapshot.totalQuota?.percent;
   const known = percent != null && Number.isFinite(percent);
-  const waiting = snapshot.recommendation.state === "waiting";
-  const resetAt = snapshot.recommendation.estimatedAvailableAt;
+  const recommendation = snapshot.totalQuota?.recommendation ?? snapshot.recommendation;
+  const waiting = recommendation.state === "waiting" && !(known && percent > 0);
+  const resetAt = recommendation.estimatedAvailableAt;
   const minutes = resetAt ? Math.ceil((Date.parse(resetAt) - now) / 60000) : NaN;
   const timeLines = waiting && Number.isFinite(minutes) && minutes > 0
     ? minutes >= 1440

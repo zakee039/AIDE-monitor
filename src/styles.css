@@ -121,7 +121,7 @@ svg { flex-shrink: 0; }
 .layout-horizontal .account-status { flex-basis: 100%; justify-content: flex-start; }
 .density-comfortable .account-main { padding-top: 13px; padding-bottom: 13px; }
 .settings-stage.browser { padding: 32px 24px; }
-.settings-shell { width: 880px; max-width: 100%; min-height: 680px; overflow: hidden; border-radius: 16px; border: 1px solid color-mix(in srgb, var(--border) 25%, transparent); box-shadow: 0 25px 75px #0005; }
+.settings-shell { width: 900px; max-width: 100%; min-height: 680px; overflow: hidden; border-radius: 16px; border: 1px solid color-mix(in srgb, var(--border) 25%, transparent); box-shadow: 0 25px 75px #0005; }
 .desktop .settings-shell { width: 100%; height: 100vh; min-height: 0; border: none; border-radius: 0; display: flex; flex-direction: column; }
 .settings-header { height: 64px; padding: 0 22px; border-bottom: 1px solid color-mix(in srgb, var(--border) 15%, transparent); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
 .settings-header .brand-icon { width: 32px; height: 32px; }
@@ -430,7 +430,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline-color:
 .theme-manager .theme-option-info button { border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px; }
 
 /* Dense account table. Columns stay aligned while aliases save in place. */
-.selection-columns, .selection-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(70px, 100px) 82px minmax(90px, 140px) 52px; gap: 10px; align-items: center; }
+.selection-columns, .selection-row { display: grid; grid-template-columns: minmax(90px, 1fr) 76px 68px minmax(90px, 140px) 52px; gap: 8px; align-items: center; }
 .selection-columns { padding: 7px 14px; color: var(--text-muted); font-size: 12px; }
 .selection-row { padding: 9px 14px; min-height: 48px; }
 .selection-row > label { width: 100%; gap: 10px; }
@@ -478,3 +478,16 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline-color:
 .proxy-row input { width: 100%; min-width: 0; }
 .update-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .selection-row > select { min-width: 0; width: 100%; }
+
+.quota-help { margin: 12px 17px; font-size: 12px; color: var(--text-muted); }
+.quota-profile-settings { padding: 0 17px 17px; }
+.quota-profile-settings summary { cursor: pointer; font-size: 13px; }
+.quota-profile-settings .quota-help { margin: 12px 0; }
+.quota-profile-row { padding: 10px 0; border-top: 1px solid color-mix(in srgb, var(--border) 20%, transparent); }
+.quota-profile-row > label { display: flex; gap: 12px; justify-content: space-between; align-items: center; }
+.quota-profile-row > label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.quota-profile-row select { max-width: 65%; }
+.quota-custom { display: flex; gap: 10px; align-items: end; margin-top: 10px; flex-wrap: wrap; }
+.quota-custom label { display: grid; gap: 4px; font-size: 12px; }
+.quota-custom input { width: 100px; }
+.selection-row > select { padding-left: 7px; padding-right: 3px; min-width: 0; }

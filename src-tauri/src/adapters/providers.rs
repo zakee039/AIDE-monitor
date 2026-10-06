@@ -101,6 +101,27 @@ fn remaining(v: &Value) -> Option<f64> {
             percent(Some(rem / total * 100.0))
         })
 }
+// Only copy bounded plan identifiers, never whole billing/auth objects into the public DTO.
+pub fn plan_type(v: &Value) -> Option<String> {
+    [
+        "/plan_type",
+        "/planType",
+        "/subscription_type",
+        "/subscriptionTier",
+        "/tier/id",
+        "/config/planType",
+    ]
+    .iter()
+    .find_map(|path| v.pointer(path).and_then(Value::as_str))
+    .filter(|s| {
+        !s.is_empty()
+            && s.len() <= 64
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_- .".contains(c))
+    })
+    .map(str::to_owned)
+}
+
 pub fn parse(
     v: &Value,
     provider: &str,
@@ -238,6 +259,7 @@ pub fn parse(
         ));
     }
     let mut q = AccountQuota::empty(id);
+    q.plan_type = plan_type(v);
     q.origin = "network".into();
     q.status = "ok".into();
     q.freshness = "fresh".into();

@@ -1,3 +1,4 @@
+import { QuotaSettings } from "./QuotaSettings";
 import { ProxySettings } from "./ProxySettings";
 import { UpdatePanel } from "./UpdatePanel";
 import { UsbDisplayPanel } from "./UsbDisplayPanel";
@@ -327,7 +328,7 @@ function QuotaOrb({ snapshot, now, onExpand, locked }: { locked: boolean; snapsh
   const total = snapshot.totalQuota;
   const { waiting, timeLines, text } = orbDisplay(snapshot, now);
   const drag = useRef({ x: 0, y: 0, moved: false, pressed: false });
-  return <button className={`quota-orb ${waiting ? "orb-waiting" : ""} ${!timeLines && text.length > 4 ? "orb-long" : ""} ${!timeLines && text.length > 5 ? "orb-extra-long" : ""}`} aria-label={`${t("展开悬浮窗")} · ${t(waiting ? "等待重置" : "估算总额度")} ${text}${total?.partial ? ` · ${t("部分账号数据不可用")}` : ""}`} onPointerDown={event => {
+  return <button title={`${total?.providerId ?? "ChatGPT"}${total?.estimated ? ` · ${t("按基础档估算")}` : ""}`} className={`quota-orb ${waiting ? "orb-waiting" : ""} ${!timeLines && text.length > 4 ? "orb-long" : ""} ${!timeLines && text.length > 5 ? "orb-extra-long" : ""}`} aria-label={`${t("展开悬浮窗")} · ${t(waiting ? "等待重置" : "估算总额度")} ${text}${total?.partial ? ` · ${t("部分账号数据不可用")}` : ""}`} onPointerDown={event => {
     if (event.button === 0) drag.current = { x: event.clientX, y: event.clientY, moved: false, pressed: true };
   }} onPointerMove={event => {
     const origin = drag.current;
@@ -341,7 +342,7 @@ function QuotaOrb({ snapshot, now, onExpand, locked }: { locked: boolean; snapsh
 }
 
 type Performer = (key: string, action: () => Promise<unknown>, success?: string) => Promise<void>;
-type SettingSection = "general" | "accounts" | "themes" | "usb" | "about";
+type SettingSection = "general" | "display" | "accounts" | "themes" | "usb" | "about";
 
 function SettingsView({ state, loading, error, notice, busy, perform, reload, onBack }: { state: AppState; loading: boolean; error: string | null; notice: string | null; busy: string | null; perform: Performer; reload: () => Promise<void>; onBack: () => void }) {
   const [section, setSection] = useState<SettingSection>("general");
@@ -364,7 +365,7 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
   const rescan = () => { void perform("rescan", () => internal("source_rescan", {}), "账号列表已重新读取。"); };
   const changeOrder = (id: string, direction: number) => setSelection(current => { const index = current.indexOf(id); const destination = index + direction; if (index < 0 || destination < 0 || destination >= current.length) return current; const next = [...current]; [next[index], next[destination]] = [next[destination], next[index]]; return next; });
   const selectionDirty = JSON.stringify(selection) !== JSON.stringify(state.accounts.filter(account => account.selected).sort((a, b) => a.order - b.order).map(account => account.id));
-  const nav = [{ id: "general", label: "常规", icon: <SlidersHorizontal size={17} /> }, { id: "accounts", label: "账号", icon: <Database size={17} /> }, { id: "themes", label: "外观", icon: <Palette size={17} /> }, { id: "usb", label: "USB 屏幕", icon: <Layers3 size={17} /> }, { id: "about", label: "关于", icon: <Info size={17} /> }] as const;
+  const nav = [{ id: "general", label: "常规", icon: <SlidersHorizontal size={17} /> }, { id: "display", label: "窗口与显示", icon: <Settings2 size={17} /> }, { id: "accounts", label: "账号", icon: <Database size={17} /> }, { id: "themes", label: "外观", icon: <Palette size={17} /> }, { id: "usb", label: "USB 屏幕", icon: <Layers3 size={17} /> }, { id: "about", label: "关于", icon: <Info size={17} /> }] as const;
 
   return localize(<div className="settings-shell" style={themeStyle(defaultTheme)}>
     {sourcesOpen && <SourceDialog error={error} sources={sources} setSources={setSources} busy={busy} onClose={() => setSourcesOpen(false)} onPick={pickSource} onSave={() => { void perform("sources-save", async () => { await internal("sources_save", { sources }); setSourcesOpen(false); }, "数据源已保存并扫描。"); }} />}
@@ -379,7 +380,12 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
         <SettingsCard title="数据源" icon={<Database size={17} />} action={<button className="secondary-button" disabled={busy !== null} onClick={openSources}>选择源</button>}>{state.snapshot?.source.error && <p className="source-error" role="alert">{t("数据源暂不可用")} ({state.snapshot.source.error.code})</p>}</SettingsCard>
         <SettingsCard title="配额刷新" icon={<RefreshCw size={17} />}><ToggleRow title="自动刷新" detail="定期获取所选账号的最新配额" checked={settings?.autoRefresh ?? false} disabled={busy !== null || !settings} onChange={checked => patch("auto-refresh", { autoRefresh: checked })} /><div className="setting-row"><div><strong>刷新间隔</strong></div><select aria-label="刷新间隔" value={interval} disabled={busy !== null || !settings} onChange={event => { setIntervalValue(event.target.value); patch("interval", { refreshIntervalSeconds: Number(event.target.value) }); }}><option value="60">1 分钟</option><option value="300">5 分钟</option><option value="600">10 分钟</option><option value="900">15 分钟</option><option value="1800">30 分钟</option>{![60, 300, 600, 900, 1800].includes(settings?.refreshIntervalSeconds ?? 300) && <option value={settings?.refreshIntervalSeconds}>{settings?.refreshIntervalSeconds} 秒</option>}</select></div></SettingsCard>
         {settings && <ProxySettings settings={settings} reload={reload} />}
+
+      </>}
+      {section === "display" && <>
+        <SectionHeading eyebrow="WINDOW & DISPLAY" title="窗口与显示" description="" />
         <SettingsCard title="窗口与显示" icon={<Settings2 size={17} />}><ToggleRow title="开机自启" detail="" checked={startup ?? false} disabled={busy !== null || startup === null} onChange={enabled => { void perform("startup", async () => { setStartup((await internal("startup", { enabled })).enabled); }); }} /><ToggleRow title="始终置顶" detail="让 HUD 保持在其他窗口上方" checked={settings?.display.alwaysOnTop ?? true} disabled={busy !== null || !settings} onChange={checked => patch("pin", { display: { alwaysOnTop: checked } })} /><ToggleRow title="锁定位置" detail="" checked={settings?.display.positionLocked ?? false} disabled={busy !== null || !settings} onChange={checked => patch("position-lock", { display: { positionLocked: checked } })} /><ToggleRow title="隐私模式" detail="用“账号 1”等名称遮罩账号显示" checked={settings?.display.privacyMode ?? false} disabled={busy !== null || !settings} onChange={checked => patch("privacy", { display: { privacyMode: checked } })} /></SettingsCard>
+        <SettingsCard title="悬浮窗额度" icon={<Settings2 size={17} />}>{settings && <QuotaSettings settings={settings} accounts={state.accounts} busy={busy !== null} onChange={display => patch("quota-display", { display })} />}</SettingsCard>
       </>}
       {section === "accounts" && <><SectionHeading eyebrow="YOUR ACCOUNTS" title="账号" description="勾选要显示的账号，并调整 HUD 中的顺序。" />
         <div className="account-selection-header"><span>{selection.length} 个已选择 / {state.accounts.length} 个账号</span><button className="text-button" disabled={busy !== null} onClick={rescan}><RefreshCw size={14} className={busy === "rescan" ? "spin" : ""} />重新扫描</button></div>

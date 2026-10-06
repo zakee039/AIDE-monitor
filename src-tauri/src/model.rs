@@ -73,6 +73,8 @@ pub struct QuotaWindow {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountQuota {
+    #[serde(default)]
+    pub plan_type: Option<String>,
     pub account_id: String,
     pub origin: String,
     pub freshness: String,
@@ -95,6 +97,7 @@ impl AccountQuota {
     pub fn empty(account_id: impl Into<String>) -> Self {
         Self {
             account_id: account_id.into(),
+            plan_type: None,
             origin: "none".into(),
             freshness: "unknown".into(),
             status: "unavailable".into(),
@@ -180,6 +183,9 @@ impl Default for SourceStatus {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TotalQuota {
+    pub provider_id: String,
+    pub recommendation: Option<Recommendation>,
+    pub estimated: bool,
     pub percent: Option<f64>,
     pub partial: bool,
     pub weekly_scale_percent: f64,
@@ -188,6 +194,9 @@ pub struct TotalQuota {
 impl Default for TotalQuota {
     fn default() -> Self {
         Self {
+            provider_id: "chatgpt".into(),
+            recommendation: None,
+            estimated: false,
             percent: None,
             partial: false,
             weekly_scale_percent: 15.0,
@@ -255,6 +264,10 @@ pub struct RefreshJob {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DisplaySettings {
+    #[serde(default = "default_quota_provider")]
+    pub quota_provider: String,
+    #[serde(default)]
+    pub quota_profiles: BTreeMap<String, String>,
     #[serde(default)]
     pub position_locked: bool,
     pub always_on_top: bool,
@@ -263,9 +276,15 @@ pub struct DisplaySettings {
     pub locale: String,
 }
 
+fn default_quota_provider() -> String {
+    "chatgpt".into()
+}
+
 impl Default for DisplaySettings {
     fn default() -> Self {
         Self {
+            quota_provider: default_quota_provider(),
+            quota_profiles: BTreeMap::new(),
             position_locked: false,
             always_on_top: true,
             show_hover_details: false,
@@ -320,6 +339,8 @@ impl Default for Settings {
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DisplaySettingsPatch {
+    pub quota_provider: Option<String>,
+    pub quota_profiles: Option<BTreeMap<String, String>>,
     pub position_locked: Option<bool>,
     pub always_on_top: Option<bool>,
     pub show_hover_details: Option<bool>,

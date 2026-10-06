@@ -3,6 +3,7 @@ mod config;
 mod domain;
 mod model;
 mod network;
+mod quota_total;
 mod service;
 mod smoke;
 mod startup;
@@ -508,7 +509,7 @@ fn open_settings(app: &tauri::AppHandle) -> Result<(), ApiError> {
             },
         )
         .skip_taskbar(false)
-        .inner_size(720.0, 620.0)
+        .inner_size(740.0, 620.0)
         .min_inner_size(600.0, 480.0)
         .background_color(tauri::webview::Color(250, 246, 236, 255))
         .visible(!smoke::is_enabled() || smoke::is_interactive())

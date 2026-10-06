@@ -59,6 +59,7 @@ export interface QuotaWindow {
 }
 
 export interface AccountQuota {
+  planType?: string | null;
   resetCreditsAvailable?: number | null; // Available manual resets; absent/invalid stays unknown.
   accountId: AccountId;
   origin: "network" | "cockpit_cache" | "none";
@@ -104,7 +105,7 @@ export interface Snapshot {
   quotas: AccountQuota[];
   availability: AccountAvailability[];
   recommendation: Recommendation;
-  totalQuota?: { percent: number | null; partial: boolean; weeklyScalePercent: number }; // Estimate; 15% is a local heuristic.
+  totalQuota?: { percent: number | null; partial: boolean; weeklyScalePercent: number; providerId?: string; recommendation?: Recommendation | null; estimated?: boolean }; // Local per-plan estimates, not provider guarantees.
   nextRefreshAt: UtcTime | null;
 }
 
@@ -123,6 +124,8 @@ export interface RefreshJob {
 }
 
 export interface DisplaySettings {
+  quotaProvider?: string;
+  quotaProfiles?: Record<string, string>;
   positionLocked: boolean;
   alwaysOnTop: boolean;
   showHoverDetails: boolean;

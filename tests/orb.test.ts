@@ -4,8 +4,8 @@ import { orbDisplay } from "../src/orb.ts";
 
 const now = Date.parse("2026-10-06T00:00:00Z");
 const recommendation = { state: "waiting" as const, accountId: "a", estimatedAvailableAt: "2026-10-06T04:10:00Z", reason: "quota_exhausted", coverage: { selected: 2, known: 1, unknown: 1, complete: false } };
-test("4h10m recommendation survives missing, partial, zero and positive aggregate estimates", () => {
-  for (const totalQuota of [undefined, { percent: null, partial: true, weeklyScalePercent: 15 }, { percent: 0, partial: true, weeklyScalePercent: 15 }, { percent: 0, partial: false, weeklyScalePercent: 15 }, { percent: 1, partial: false, weeklyScalePercent: 15 }]) {
+test("4h10m recommendation survives missing, partial and zero aggregate estimates", () => {
+  for (const totalQuota of [undefined, { percent: null, partial: true, weeklyScalePercent: 15 }, { percent: 0, partial: true, weeklyScalePercent: 15 }, { percent: 0, partial: false, weeklyScalePercent: 15 }]) {
     assert.deepEqual(orbDisplay({ recommendation, totalQuota }, now), { waiting: true, timeLines: ["4h", "10m"], text: "4h 10m" });
   }
 });
@@ -21,4 +21,11 @@ test("short waits and day waits use two lines", () => {
 test("available accounts keep the percentage and wholly unknown data keeps the dash", () => {
   assert.equal(orbDisplay({ recommendation: { ...recommendation, state: "now" }, totalQuota: { percent: 54.8, partial: false, weeklyScalePercent: 15 } }, now).text, "54%");
   assert.equal(orbDisplay({ recommendation: { ...recommendation, state: "unknown" } }, now).text, "—");
+});
+
+test("selected provider countdown cannot leak from another platform", () => {
+  const own = { ...recommendation, state: "now" as const, estimatedAvailableAt: null };
+  assert.equal(orbDisplay({ recommendation, totalQuota: { percent: 80, partial: false, weeklyScalePercent: 25, providerId: "antigravity", recommendation: own } }, now).text, "80%");
+  assert.equal(orbDisplay({ recommendation: own, totalQuota: { percent: 0, partial: false, weeklyScalePercent: 15, recommendation } }, now).text, "4h 10m");
+  assert.equal(orbDisplay({ recommendation, totalQuota: { percent: 1, partial: false, weeklyScalePercent: 15, recommendation } }, now).text, "1%");
 });

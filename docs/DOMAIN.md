@@ -51,7 +51,19 @@ Rust 领域层计算配额状态与推荐结果，前端和主题只负责展示
 
 配额响应中一个基础槽位包含有效 604,800 秒百分比窗口、另一个槽位为 null 或不存在时，适配器将不存在的槽位标为 `not_applicable`。周窗口可以在 primary 或 secondary 中；存在但格式损坏的另一槽位仍为未知，不得按“只有周限额”放行。推荐阈值按真实时长应用：5H ≥ 5%，周 ≥ 2%；没有 5H 限制时只检查周额度。
 
-快照的 `totalQuota` 为 `{percent: number|null, partial: boolean, weeklyScalePercent: 15}`，由 Rust 在与推荐相同的采样时刻计算，只统计已选且可信的基础配额。双限额账号贡献 `H × min(W/15, 1)`，单周限额账号贡献 W。H 和 W 均是未经显示取整的剩余百分比。小于推荐阈值的正余额仍可贡献总量；推荐阈值不改变估算公式。重复 ID 不重复计入，总量允许超过 100%。
+快照的 `totalQuota` 按 `display.quotaProvider` 单独统计已勾选账号，支持 chatgpt（含 codex / codex_usage）、claude、antigravity、grok。字段保留 percent / partial / weeklyScalePercent，新增 providerId、recommendation（该平台独立倒计时）、estimated（未返回订阅而暂按基础档估算）。平台下没有账号被勾选时返回未知总量，不混入其他平台。所选平台已不存在时按上述平台列表的固定顺序回退到已有平台。
+
+设 H、W 为 0..100 的剩余百分数，m 为相对基础订阅的额度倍率（5h 账号指 5h 容量，纯周账号指周容量），r 为完整 5h 额度对应的本账号周额度比例（0..1），r0 为该平台基础档的比例。
+- 有 5h 限制：H < 5 或 W < 2 时贡献为 0，否则 `m × min(H, W/r)`。等于阈值仍计入。
+- 存在 5h 账号时，纯周账号贡献 `W × m/r0`。在剔除低余额前判断单位，避免耗尽后总量切换单位。
+- 全部纯周账号：以基础订阅周额度为单位，贡献 `W × m`。同档直接相加；不同档按倍率加权。
+- 只累计可信且未过重置时间的网络数据，失败、过期、缺字段及无法识别的订阅档位不累计并标记 partial；重复账号 ID 只计一次，总量可超过 100%。缺少 5h 测量不等于确认无限制。
+- Antigravity 只计算展开列表正在展示的 Gemini 池，不把 Claude 等模型池直接相加。Grok 使用接口的基础周额度池，不混入产品子额度或 Xpass 泄露规则。
+
+暂定比例：ChatGPT 15%；Claude Pro 15%、Max 5x 10%、Max 20x 20%；Antigravity Pro / Ultra 25%（Ultra 为占位）；Grok 纯周账号不需要 5h 换算。已知档位在 `quota_total::profile` 集中配置。Claude Max 当前按有 5h 限制账号处理，不把会话倍率用来推断不存在的纯周套餐。
+
+`display.quotaProfiles` 可按账号指定档位，或使用 `custom:倍率:周占比百分数`。自定义倍率范围 0.01..1000，占比范围 0.01..100。订阅元数据缺失才暂按基础档估算；存在但无法识别的档位（如笼统 pro / ultra 或 Grok 高级档）需手动指定，避免猜倍率。自动识别不改写上游数据。
+
 
 15% 是本项目使用的估算规则，[OpenAI 官方说明](https://learn.chatgpt.com/docs/pricing) 未提供固定的 5H/周额度换算比例。不同账号套餐的百分比汇总也不表示实际可执行的统一 token 数量。
 

@@ -199,6 +199,7 @@ pub fn parse_usage(
         .checked_add_signed(Duration::seconds(300))
         .map(timestamp);
     Ok(AccountQuota {
+        plan_type: super::providers::plan_type(value),
         account_id: hud_account_id.to_owned(),
         origin: "network".into(),
         freshness: "fresh".into(),

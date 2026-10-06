@@ -1,6 +1,16 @@
 # AIDE monitor
 
-AIDE monitor（AI IDE monitor），专业的 AI IDE 订阅额度监视器。集中监控多账号配额与恢复时间，支持桌面悬浮窗和 USB 屏幕，基于 Tauri 2、Rust、React。当前版本 **0.5.1**。
+AIDE monitor（AI IDE monitor），专业的 AI IDE 订阅额度监视器。集中监控多账号配额与恢复时间，支持桌面悬浮窗和 USB 屏幕，基于 Tauri 2、Rust、React。当前版本 **0.5.2**。
+
+## 0.5.2
+
+- 圆形悬浮窗支持 ChatGPT、Claude、Antigravity、Grok 独立累计，只列出已有账号的平台。
+- 5h 账号先剔除 5h < 5% 或周额度 < 2% 的余额，再按周额度可支持的实际容量折算；支持不同订阅倍率及 5h / 7d 混用。
+- “窗口与显示”独立成设置页，位于常规下方。增加平台选择和按账号指定订阅档位、自定义倍率及换算比例。
+- 缩窄账号表的代理和自动刷新列，设置窗口默认宽度从 720 调整到 740 逻辑像素。
+- Claude / Antigravity 换算比例为暂定估算；Antigravity 采用 Gemini 额度池，Grok 高级订阅可自定义倍率。
+
+[0.5.2 版本说明](docs/releases/v0.5.2.md)
 
 ## 0.5.1
 
@@ -27,7 +37,7 @@ AIDE monitor（AI IDE monitor），专业的 AI IDE 订阅额度监视器。集�
 - 薄荷初音底栏头像由 22px 放大为 32px，并收紧左侧及底部留白至约 3px。
 
 - 账号表改为单行，自动刷新可选 `- / 禁止 / 1min / 5min / 15min / 1h`；`-` 继承全局，其他项覆盖全局开关及间隔。禁止不影响手动刷新。
-- 常规 → 窗口与显示可锁定位置，包括收起的圆窗和第三方主题拖动。
+- 窗口与显示可锁定位置，包括收起的圆窗和第三方主题拖动。
 - 展开/收起在原生窗口尺寸及右边缘定位完成后显示，避免圆窗先在左侧闪现。
 - 三套内置主题：miku mint / 薄荷初音、dark / 黑暗、white / 明亮。薄荷初音加入可伸缩葱分隔线和头像。
 - USB 屏幕使用独立、无边框、不可缩放的全屏展示窗口；三套内置主题等比适配横屏、竖屏及高 DPI。按 Windows 显示器接口身份记忆设备，断线隐藏，不选择其他屏幕，重连自动恢复。
@@ -37,7 +47,7 @@ AIDE monitor（AI IDE monitor），专业的 AI IDE 订阅额度监视器。集�
 
 在设置的“常规 → 数据源”选择来源，然后在“账号”勾选需要显示的账号。支持官方客户端、Cockpit Tools、CC Switch、CLIProxyAPI 与 Sub2API 本地导出。只读登录文件，不修改原账号或执行自定义余额脚本；登录过期后在原客户端重新登录。
 
-支持 Codex、Claude OAuth、Antigravity、Grok CLI OAuth。配额失败或缺失时不会推断为满额。Codex 汇总估算不包含其他平台；其换算规则见 [额度规则](docs/DOMAIN.md)。
+支持 Codex、Claude OAuth、Antigravity、Grok CLI OAuth。配额失败或缺失时不会推断为满额。圆形悬浮窗按所选平台独立累计；其换算规则见 [额度规则](docs/DOMAIN.md)。
 
 外观页保留三套内置主题，可安装本地 `.aidetheme` 文件；加载异常时从托盘选择“恢复内置主题”。折叠圆球、隐藏后均可通过托盘找回窗口。
 
@@ -50,7 +60,7 @@ npm ci
 npm run tauri dev
 npm test
 cargo test --manifest-path src-tauri/Cargo.toml
-npm run tauri build
+powershell -ExecutionPolicy Bypass -File tools/build-artifacts.ps1
 ```
 
 在生产构建上运行合成账号验收，不访问真实凭据：
@@ -66,7 +76,7 @@ npm run tauri build
 .\tools\pack-theme.ps1
 ```
 
-安装包位于 `src-tauri/target/release/bundle/nsis`。本版继续使用已有应用标识以保留账号设置；旧第三方 JSON 主题不迁移。
+发布产物统一位于 `artifacts/release-v0.5.2/`，包括独立运行 EXE、安装包、便携 ZIP 与 SHA-256 校验文件。本版继续使用已有应用标识以保留账号设置；旧第三方 JSON 主题不迁移。
 
 ## 项目资料
 

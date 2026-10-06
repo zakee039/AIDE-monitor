@@ -218,59 +218,18 @@ fn weekly_reset(quota: Option<&AccountQuota>) -> Option<DateTime<Utc>> {
 
 /// User-requested estimate, not an official conversion or recommendation floor.
 /// Tiny positive balances still count; stale/failed/unconfirmed balances do not.
+#[cfg(test)]
 pub fn total_quota(
     accounts: &[AccountSummary],
     quotas: &[AccountQuota],
     now: DateTime<Utc>,
 ) -> TotalQuota {
-    let mut total = 0.0;
-    let mut known = 0;
-    let mut selected = 0;
-    let mut seen = HashSet::new();
-    for account in accounts.iter().filter(|account| account.selected) {
-        if !seen.insert(&account.id) {
-            continue;
-        }
-        selected += 1;
-        if !matches!(account.provider_id.as_str(), "codex" | "codex_usage") {
-            continue;
-        }
-        let Some(quota) = quotas.iter().find(|quota| quota.account_id == account.id) else {
-            continue;
-        };
-        let availability = evaluate(quota, now);
-        if !matches!(availability.state.as_str(), "now" | "waiting") {
-            continue;
-        }
-        let required: Vec<_> = quota
-            .windows
-            .iter()
-            .filter(|window| window.scope == "base" && window.applicability == "required")
-            .collect();
-        let five = required
-            .iter()
-            .find(|window| window.duration_seconds == Some(18_000));
-        let week = required
-            .iter()
-            .find(|window| window.duration_seconds == Some(604_800));
-        let contribution = match (five, week) {
-            (Some(five), Some(week)) if required.len() == 2 => five
-                .remaining_percent
-                .zip(week.remaining_percent)
-                .map(|(h, w)| h * (w / 15.0).clamp(0.0, 1.0)),
-            (None, Some(week)) if required.len() == 1 => week.remaining_percent,
-            _ => None,
-        };
-        if let Some(value) = contribution {
-            total += value;
-            known += 1;
-        }
-    }
-    TotalQuota {
-        percent: (known > 0).then_some(total),
-        partial: known < selected,
-        weekly_scale_percent: 15.0,
-    }
+    crate::quota_total::calculate(
+        accounts,
+        quotas,
+        now,
+        &crate::model::DisplaySettings::default(),
+    )
 }
 
 /// Availability is produced by `evaluate` at the caller's common sampling time.
@@ -402,6 +361,7 @@ mod tests {
             .iter()
             .any(|window| window.scope == "base" && window.exhausted == Some(true));
         AccountQuota {
+            plan_type: None,
             account_id: id.into(),
             origin: "network".into(),
             freshness: "fresh".into(),
@@ -474,7 +434,7 @@ mod tests {
     #[test]
     fn total_scales_weekly_balances_and_can_exceed_one_hundred() {
         let accounts = [account("a", 0), account("b", 1)];
-        for (weekly, expected) in [(0.0, 52.0), (7.5, 76.5), (15.0, 101.0), (77.0, 101.0)] {
+        for (weekly, expected) in [(0.0, 52.0), (7.5, 101.0), (15.0, 101.0), (77.0, 101.0)] {
             let total = total_quota(
                 &accounts,
                 &[balance("a", 52.0, 77.0), balance("b", 49.0, weekly)],
@@ -484,9 +444,9 @@ mod tests {
             assert!(!total.partial);
             assert_eq!(total.weekly_scale_percent, 15.0);
         }
-        // Recommendation floors do not erase small positive contributions.
+        // Low balances are excluded from usable quota.
         let low = total_quota(&[account("a", 0)], &[balance("a", 1.0, 1.0)], time());
-        assert!((low.percent.unwrap() - 1.0 / 15.0).abs() < 0.00001);
+        assert_eq!(low.percent, Some(0.0));
     }
 
     #[test]
