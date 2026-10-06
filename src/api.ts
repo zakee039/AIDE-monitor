@@ -42,7 +42,10 @@ export async function call<M extends keyof MethodMap>(method: M, params: MethodM
 }
 
 export interface SourceOption { id: string; enabled: boolean; path: string | null }
+export interface UpdateInfo { currentVersion: string; latestVersion: string; updateAvailable: boolean; notes: string }
 interface InternalMethods {
+  update_check: { params: Record<string, never>; data: UpdateInfo };
+  update_open: { params: Record<string, never>; data: { opened: boolean } };
   sources_get: { params: Record<string, never>; data: SourceOption[] };
   sources_save: { params: { sources: SourceOption[] }; data: SourceStatus };
   sources_pick: { params: Record<string, never>; data: { path: string | null } };

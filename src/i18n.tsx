@@ -3,6 +3,13 @@ import { cloneElement, isValidElement, type ReactNode } from "react";
 let language = "en";
 export function setLanguage(locale: string) { language = locale; }
 const en: Record<string, string> = {
+  "代理": "Proxy", "系统": "System", "代理地址设置": "Proxy profiles", "添加代理": "Add proxy", "代理名称": "Proxy name", "代理地址": "Proxy address", "删除代理": "Delete proxy", "名称，如腾讯云": "Name, e.g. Tencent Cloud",
+  "每行一组，输入即保存。在账号页选择代理，默认使用系统设置。": "One profile per row, saved as you type. Assign it to an account; System is the default.",
+  "支持 HTTP、HTTPS、SOCKS5。删除代理后，关联账号恢复为系统设置。": "Supports HTTP, HTTPS and SOCKS5. Removing a profile returns its accounts to System.",
+  "已自动保存": "Saved automatically", "版本更新": "Updates", "检查更新": "Check for updates", "正在检查…": "Checking…",
+  "通过 GitHub Releases 检查最新正式版本。": "Check GitHub Releases for the latest stable version.", "请在桌面应用中检查更新。": "Check for updates in the desktop app.", "发现新版本": "Update available", "当前已是最新版本": "You are up to date", "前往 GitHub 下载": "Download from GitHub", "版本说明": "Release notes",
+  "专业的 AI IDE 订阅额度监视器": "Professional subscription quota monitoring for AI IDEs",
+  "AIDE monitor（AI IDE monitor），专业的订阅额度监视器。集中查看多个 AI IDE 账号的剩余额度、重置时间与最早恢复时间，支持独立代理、桌面悬浮窗与 USB 屏幕。": "AIDE monitor (AI IDE monitor) is a professional subscription quota monitor. Track remaining quotas, reset times and the earliest recovery across AI IDE accounts, with per-account proxies, a desktop HUD and USB displays.",
   "独立于悬浮窗，自动铺满选定屏幕。设备断开后等待原屏幕重新连接。": "An independent display that fills the selected monitor and waits for the same device after disconnection.",
   "启用屏幕展示": "Enable display", "目标屏幕": "Target monitor", "选择屏幕": "Select a monitor", "已记忆的屏幕（未连接）": "Saved monitor (disconnected)", "主题": "Theme", "屏幕主题": "Display theme", "未启用": "Disabled", "屏幕已连接": "Monitor connected", "等待原屏幕重新连接": "Waiting for the saved monitor", "自动检测 Windows 显示器；仅支持在系统显示设置中可见的 USB 小屏。": "Automatically detects Windows monitors. USB screens must be visible in Windows display settings.",
   "薄荷初音": "miku mint", "黑暗": "dark", "明亮": "white", "锁定位置": "Lock position", "USB 监视屏": "USB display", "USB 屏幕": "USB display", "排序": "Order", "禁止": "Off",

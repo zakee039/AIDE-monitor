@@ -279,6 +279,10 @@ impl Default for DisplaySettings {
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     #[serde(default)]
+    pub proxies: Vec<ProxyProfile>,
+    #[serde(default)]
+    pub account_proxies: BTreeMap<String, String>,
+    #[serde(default)]
     pub account_refresh: BTreeMap<String, u64>,
     #[serde(default)]
     pub usb_display: UsbDisplaySettings,
@@ -289,9 +293,19 @@ pub struct Settings {
     pub active_theme_id: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProxyProfile {
+    pub id: String,
+    pub name: String,
+    pub address: String,
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            proxies: vec![],
+            account_proxies: BTreeMap::new(),
             account_refresh: BTreeMap::new(),
             usb_display: UsbDisplaySettings::default(),
             settings_revision: 0,
@@ -316,6 +330,8 @@ pub struct DisplaySettingsPatch {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SettingsPatch {
+    pub proxies: Option<Vec<ProxyProfile>>,
+    pub account_proxies: Option<BTreeMap<String, String>>,
     pub account_refresh: Option<BTreeMap<String, u64>>,
     pub usb_display: Option<UsbDisplaySettings>,
     pub expected_revision: u64,

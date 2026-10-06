@@ -723,6 +723,33 @@ impl Service {
             return Err(ApiError::new("CONFLICT", "设置已更新，请重新读取后再保存"));
         }
         let mut config = d.config.clone();
+        if let Some(proxies) = patch.proxies {
+            let mut ids = std::collections::HashSet::new();
+            if proxies.len() > 100
+                || proxies.iter().any(|p| {
+                    p.id.is_empty()
+                        || !ids.insert(&p.id)
+                        || p.name.len() > 200
+                        || p.address.len() > 2048
+                })
+            {
+                return Err(ApiError::new("INVALID_ARGUMENT", "代理设置无效"));
+            }
+            config
+                .settings
+                .account_proxies
+                .retain(|_, id| proxies.iter().any(|p| &p.id == id));
+            config.settings.proxies = proxies;
+        }
+        if let Some(overrides) = patch.account_proxies {
+            if overrides.iter().any(|(account, proxy)| {
+                !d.accounts.iter().any(|a| &a.summary.id == account)
+                    || !config.settings.proxies.iter().any(|p| &p.id == proxy)
+            }) {
+                return Err(ApiError::new("INVALID_ARGUMENT", "账号代理设置无效"));
+            }
+            config.settings.account_proxies = overrides;
+        }
         if let Some(overrides) = patch.account_refresh {
             if overrides.iter().any(|(id, v)| {
                 ![0, 60, 300, 900, 3600].contains(v)
@@ -955,6 +982,19 @@ impl Service {
             joined: false,
         })
     }
+    fn account_client(&self, id: &str) -> Result<reqwest::Client, ApiError> {
+        let settings = self.settings();
+        let Some(proxy_id) = settings.account_proxies.get(id) else {
+            return Ok(self.client.clone());
+        };
+        let proxy = settings
+            .proxies
+            .iter()
+            .find(|p| &p.id == proxy_id)
+            .ok_or_else(|| ApiError::new("INVALID_ARGUMENT", "所选代理不存在"))?;
+        crate::network::proxy_client(&proxy.address)
+    }
+
     async fn run_account(
         &self,
         job_id: String,
@@ -1001,7 +1041,11 @@ impl Service {
                                 return;
                             }
                         }
-                        let result = usage::fetch_quota(&self.client, &credentials, &id).await;
+                        let client = self.account_client(&id);
+                        let result = match &client {
+                            Ok(client) => usage::fetch_quota(client, &credentials, &id).await,
+                            Err(error) => Err(error.clone()),
+                        };
                         if result
                             .as_ref()
                             .err()
@@ -1020,7 +1064,12 @@ impl Service {
                                         d.generation == generation
                                     };
                                     if valid {
-                                        usage::fetch_quota(&self.client, &new, &id).await
+                                        usage::fetch_quota(
+                                            client.as_ref().expect("successful initial client"),
+                                            &new,
+                                            &id,
+                                        )
+                                        .await
                                     } else {
                                         result
                                     }
@@ -1411,6 +1460,39 @@ mod tests {
     }
 
     #[test]
+    fn proxy_profiles_persist_and_deletion_restores_system() {
+        let (dir, service, _) = synthetic_service();
+        let id = service.accounts(true)[0].id.clone();
+        let update = |value| service.update_settings(serde_json::from_value(value).unwrap());
+        update(
+            json!({"expectedRevision":service.settings().settings_revision,
+            "proxies":[{"id":"cloud","name":"Tencent","address":"socks5://127.0.0.1:7893"}],
+            "accountProxies":{id.clone():"cloud"}}),
+        )
+        .unwrap();
+        assert!(service.account_client(&id).is_ok());
+        let reopened = Service::new(dir.path().join("hud"), None).unwrap();
+        assert_eq!(
+            reopened
+                .settings()
+                .account_proxies
+                .get(&id)
+                .map(String::as_str),
+            Some("cloud")
+        );
+        update(
+            json!({"expectedRevision":service.settings().settings_revision,
+            "proxies":[{"id":"cloud","name":"Tencent","address":"socks5://"}]}),
+        )
+        .unwrap();
+        assert!(service.account_client(&id).is_err()); // Never fall back to the system path.
+        update(json!({"expectedRevision":service.settings().settings_revision,"proxies":[]}))
+            .unwrap();
+        assert!(service.settings().account_proxies.is_empty());
+        assert!(service.account_client(&id).is_ok());
+    }
+
+    #[test]
     fn language_defaults_to_english_and_persists_chinese() {
         let (dir, service, _) = synthetic_service();
         assert_eq!(service.settings().display.locale, "en");
@@ -1431,6 +1513,8 @@ mod tests {
         let service = Service::new(dir.path().into(), None).unwrap();
         let patch = SettingsPatch {
             expected_revision: 99,
+            proxies: None,
+            account_proxies: None,
             account_refresh: None,
             usb_display: None,
             refresh_interval_seconds: Some(60),

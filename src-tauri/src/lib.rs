@@ -2,6 +2,7 @@ mod adapters;
 mod config;
 mod domain;
 mod model;
+mod network;
 mod service;
 mod smoke;
 mod startup;
@@ -10,6 +11,7 @@ mod theme_package;
 mod theme_runtime;
 mod theme_smoke;
 mod themes;
+mod updates;
 mod usb_display;
 use theme_commands::*;
 
@@ -135,6 +137,39 @@ fn hud_v1_accounts_alias_update(
         authorize(&window, true)
             .and_then(|_| parse::<AliasRequest>(request))
             .and_then(|r| service.set_alias(&r.account_id, &r.alias)),
+    )
+}
+
+#[tauri::command]
+async fn hud_internal_update_check(
+    window: WebviewWindow,
+    service: State<'_, Service>,
+    request: Value,
+) -> Result<ApiResult<Value>, String> {
+    let result = match authorize(&window, true).and_then(|_| empty(&request)) {
+        Ok(()) => updates::check().await,
+        Err(error) => Err(error),
+    };
+    Ok(respond(&service, result))
+}
+
+#[tauri::command]
+fn hud_internal_update_open(
+    window: WebviewWindow,
+    service: State<'_, Service>,
+    request: Value,
+) -> ApiResult<Value> {
+    respond(
+        &service,
+        authorize(&window, true)
+            .and_then(|_| empty(&request))
+            .and_then(|_| {
+                std::process::Command::new("explorer.exe")
+                    .arg(updates::RELEASE_URL)
+                    .spawn()
+                    .map_err(|_| ApiError::new("IO_ERROR", "无法打开下载页面"))?;
+                Ok(json!({"opened":true}))
+            }),
     )
 }
 
@@ -507,6 +542,8 @@ fn toggle_pin(app: &tauri::AppHandle) {
     let before = service.settings();
     let result = service.update_settings(SettingsPatch {
         expected_revision: before.settings_revision,
+        proxies: None,
+        account_proxies: None,
         account_refresh: None,
         usb_display: None,
         refresh_interval_seconds: None,
@@ -780,6 +817,8 @@ pub fn run() {
             hud_v1_accounts_selection_update,
             hud_v1_accounts_alias_update,
             hud_internal_docs_open,
+            hud_internal_update_check,
+            hud_internal_update_open,
             hud_v1_recommendation_get,
             hud_v1_refresh_request,
             hud_v1_refresh_status_get,

@@ -430,7 +430,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline-color:
 .theme-manager .theme-option-info button { border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px; }
 
 /* Dense account table. Columns stay aligned while aliases save in place. */
-.selection-columns, .selection-row { display: grid; grid-template-columns: minmax(120px, 1fr) 82px minmax(100px, 160px) 52px; gap: 10px; align-items: center; }
+.selection-columns, .selection-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(70px, 100px) 82px minmax(90px, 140px) 52px; gap: 10px; align-items: center; }
 .selection-columns { padding: 7px 14px; color: var(--text-muted); font-size: 12px; }
 .selection-row { padding: 9px 14px; min-height: 48px; }
 .selection-row > label { width: 100%; gap: 10px; }
@@ -469,3 +469,12 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline-color:
 
 .usb-stage { position: relative; padding: 0; }
 .usb-stage .hud-shell { box-shadow: none; }
+
+.proxy-settings, .update-panel { padding: 16px; }
+.proxy-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.proxy-heading h2 { display: flex; gap: 10px; align-items: center; margin: 0; font-size: 16px; }
+.proxy-settings p, .update-panel p { color: var(--text-muted); font-size: 12px; }
+.proxy-row { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(150px, 2fr) 28px; gap: 10px; margin-top: 10px; }
+.proxy-row input { width: 100%; min-width: 0; }
+.update-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.selection-row > select { min-width: 0; width: 100%; }

@@ -151,9 +151,10 @@ pub fn evaluate(quota: &AccountQuota, now: DateTime<Utc>) -> AccountAvailability
     if required.is_empty() {
         return unknown(quota, "incomplete_quota");
     }
-    let Some(allowed) = quota.provider_allowed else {
+    let allowed = quota.provider_allowed == Some(true);
+    if quota.provider_allowed.is_none() && quota.blocking_reason != "quota_windows" {
         return unknown(quota, "incomplete_quota");
-    };
+    }
     let below_floor = required
         .iter()
         .any(|window| below_recommendation_floor(window));
@@ -439,6 +440,35 @@ mod tests {
         let mut secondary = window("secondary", weekly == 0.0, Some(86400));
         secondary.remaining_percent = Some(weekly);
         quota(id, vec![primary, secondary])
+    }
+
+    #[test]
+    fn screenshot_accounts_choose_first_hour_reset_not_weekly_balance() {
+        let mut a = balance("zakee3939", 0.0, 23.0);
+        a.windows[0].resets_at = Some(at(3660));
+        a.windows[1].resets_at = Some(at(496800));
+        let mut b = balance("zakee0233", 2.0, 69.0);
+        b.windows[0].resets_at = Some(at(7860));
+        b.windows[1].resets_at = Some(at(576000));
+        for permission in [Some(false), Some(true), None] {
+            a.provider_allowed = permission;
+            let availability = [evaluate(&a, time()), evaluate(&b, time())];
+            let recommendation = recommend(
+                &[account("zakee0233", 0), account("zakee3939", 1)],
+                &availability,
+                &[a.clone(), b.clone()],
+            );
+            assert_eq!(recommendation.account_id.as_deref(), Some("zakee3939"));
+            assert_eq!(recommendation.estimated_available_at, Some(at(3660)));
+        }
+        assert_eq!(
+            evaluate(&balance("boundary", 5.0, 2.0), time()).state,
+            "now"
+        );
+        assert_eq!(
+            evaluate(&balance("low_week", 5.0, 1.99), time()).estimated_available_at,
+            Some(at(86400))
+        );
     }
 
     #[test]

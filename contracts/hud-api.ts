@@ -130,7 +130,10 @@ export interface DisplaySettings {
   locale: "system" | "zh-CN" | "en";
 }
 export interface UsbDisplaySettings { enabled: boolean; deviceId: string; themeId: string }
+export interface ProxyProfile { id: string; name: string; address: string }
 export interface Settings {
+  proxies: ProxyProfile[];
+  accountProxies: Record<string, string>;
   accountRefresh: Record<string, number>;
   usbDisplay: UsbDisplaySettings;
   settingsRevision: number;
@@ -140,6 +143,8 @@ export interface Settings {
   activeThemeId: string;
 }
 export interface SettingsPatch {
+  proxies?: ProxyProfile[];
+  accountProxies?: Record<string, string>;
   accountRefresh?: Record<string, number>;
   usbDisplay?: UsbDisplaySettings;
   expectedRevision: number;

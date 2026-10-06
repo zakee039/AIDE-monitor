@@ -301,12 +301,16 @@ const SCRIPT: &str = r#"
       const beforeUpdate = await call('hud_v1_settings_get');
       const updated = await call('hud_v1_settings_update', {
         expectedRevision:beforeUpdate.settingsRevision,
+        proxies:[{id:"smoke-proxy",name:"Smoke",address:"socks5://127.0.0.1:7893"}],
+        accountProxies:{},
         refreshIntervalSeconds:61,
         autoRefresh:false,
         display:{privacyMode:true,alwaysOnTop:false,positionLocked:true},
         usbDisplay:{enabled:false,deviceId:"smoke-disconnected-monitor",themeId:"midnight"}
       });
       assert(updated.refreshIntervalSeconds === 61 && updated.display.privacyMode === true && updated.autoRefresh === false, 'SETTINGS_UPDATE_NOT_APPLIED');
+      assert(updated.proxies.length === 1 && updated.proxies[0].address === 'socks5://127.0.0.1:7893', 'PROXY_PREFERENCES_NOT_APPLIED');
+      checks.push('proxy-preferences-native-persistence');
       assert(updated.display.positionLocked && updated.usbDisplay.deviceId === 'smoke-disconnected-monitor', 'DISPLAY_PREFERENCES_NOT_APPLIED');
       const monitors = await window.__TAURI_INTERNALS__.invoke('aide_usb_displays');
       assert(Array.isArray(monitors) && monitors.every(m => typeof m.id === 'string' && m.width > 0 && m.height > 0), 'MONITOR_ENUMERATION_FAILED');

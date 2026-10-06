@@ -15,6 +15,8 @@ fn main() {
         "hud_v1_accounts_selection_update",
         "hud_v1_accounts_alias_update",
         "hud_internal_docs_open",
+        "hud_internal_update_check",
+        "hud_internal_update_open",
         "hud_v1_recommendation_get",
         "hud_v1_refresh_request",
         "hud_v1_refresh_status_get",

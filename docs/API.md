@@ -16,3 +16,9 @@
 `Settings.display.positionLocked` 控制悬浮窗及主题窗口的拖动。
 
 `Settings.usbDisplay` 为 `{ enabled, deviceId, themeId }`，整体写入；主题限三套内置主题。`deviceId` 为 Windows 监视器接口路径，不使用易变的显示器编号。配置修改继续要求 `expectedRevision`。设置窗口可通过 `aide_usb_displays` 获取当前连接屏幕；USB 窗口只获读取权限。
+
+## 0.5.1 设置扩展
+
+`Settings` / `settings.update` 增加 `proxies: Array<{id,name,address}>` 和 `accountProxies: Record<accountId, proxyId>`。缺少账号映射表示系统代理；删除代理原子解除对应映射。代理配置允许输入中间状态，但发起配额请求前严格验证，失败不回退。两项沿用 `expectedRevision` 并发控制；旧设置缺省为空。
+
+仅可信设置窗口可调用内部 `hud_internal_update_check`（检查 GitHub 最新正式版）和 `hud_internal_update_open`（打开固定 GitHub 下载页），均接受空 `request`。第三方主题不获得代理地址或更新权限。

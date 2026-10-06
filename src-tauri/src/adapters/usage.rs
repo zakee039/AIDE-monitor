@@ -161,15 +161,21 @@ pub fn parse_usage(
     if provider_allowed == Some(true) && has_exhausted {
         provider_allowed = None;
     }
-    let blocking_reason = match provider_allowed {
-        Some(true) => "none",
-        Some(false) if base_coverage_complete && has_exhausted && limit_reached == Some(true) => {
-            "quota_windows"
+    // A measured exhausted base window explains an estimated wait even when
+    // the provider's aggregate permission flags lag behind its quota windows.
+    // Preserve provider_allowed: these flags must still gate a positive "now".
+    let blocking_reason = if base_coverage_complete && has_exhausted {
+        "quota_windows"
+    } else {
+        match provider_allowed {
+            Some(true) => "none",
+            Some(false)
+                if base_coverage_complete && !has_exhausted && limit_reached == Some(false) =>
+            {
+                "other"
+            }
+            _ => "unknown",
         }
-        Some(false) if base_coverage_complete && !has_exhausted && limit_reached == Some(false) => {
-            "other"
-        }
-        _ => "unknown",
     }
     .to_owned();
     if let Some(review) = value
@@ -517,6 +523,28 @@ mod tests {
         assert_eq!(quota.blocking_reason, "none");
         assert_eq!(quota.windows[2].scope, "feature:code_review");
         assert_eq!(quota.windows[2].exhausted, Some(true));
+    }
+
+    #[test]
+    fn exhausted_window_with_lagging_flags_still_has_an_estimated_reset() {
+        let mut value = normal();
+        value["rate_limit"]["primary_window"]["used_percent"] = json!(100);
+        value["rate_limit"]["secondary_window"]["used_percent"] = json!(77);
+        let q = parse_usage(&value, "synthetic", observed()).unwrap();
+        assert_eq!(q.provider_allowed, None);
+        assert_eq!(q.blocking_reason, "quota_windows");
+        let result = crate::domain::evaluate(&q, observed());
+        assert_eq!(result.state, "waiting");
+        assert_eq!(
+            result
+                .estimated_available_at
+                .as_deref()
+                .map(|v| DateTime::parse_from_rfc3339(v).unwrap()),
+            q.windows[0]
+                .resets_at
+                .as_deref()
+                .map(|v| DateTime::parse_from_rfc3339(v).unwrap())
+        );
     }
 
     #[test]
