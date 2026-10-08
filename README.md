@@ -1,8 +1,20 @@
 # AIDE monitor
 
+<p>
+<a href="README.md"><img height="28" src=".github/assets/readme/zh-active.svg" alt="简体中文" /></a>
+<a href="README.en.md"><img height="28" src=".github/assets/readme/en-idle.svg" alt="English" /></a>
+</p>
+
 AIDE monitor（AI IDE monitor），专业的 AI IDE 订阅额度监视器。集中监控多账号配额与恢复时间，支持桌面悬浮窗和独立监视屏，基于 Tauri 2、Rust、React。当前版本 **0.6.2**。
 
-[个人主页](https://zakee.fun) · [爱发电 / Buy Me a Coffee](https://ifdian.net/a/zakee/plan) · [下载最新版](https://github.com/zakee039/AIDE-monitor/releases/latest)
+<p>
+<a href="https://aide.zakee.fun"><img height="28" src=".github/assets/readme/preview-zh.svg" alt="在线预览" /></a>
+<a href="https://github.com/zakee039/AIDE-monitor/releases/latest"><img height="28" src=".github/assets/readme/download-zh.svg" alt="下载最新版" /></a>
+<a href="https://zakee.fun"><img height="28" src=".github/assets/readme/homepage-zh.svg" alt="个人主页" /></a>
+<a href="https://ifdian.net/a/zakee/plan"><img height="28" src=".github/assets/readme/support-zh.svg" alt="支持作者" /></a>
+</p>
+
+**预览页面：[aide.zakee.fun](https://aide.zakee.fun)**
 
 ## 0.6.2
 
