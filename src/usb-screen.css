@@ -26,7 +26,8 @@
 .usb-portrait .usb-platform:nth-child(-n+2) { border-bottom: 1px solid color-mix(in srgb, var(--border) 25%, transparent); }
 
 .usb-account-card { padding: 6px 6px; }
-.usb-account-card > img { width: 32px; height: 32px; flex-shrink: 0; border-radius: 6px; }
+.usb-account-identity { display: flex; flex-direction: column; align-items: center; width: 100%; min-width: 0; flex-shrink: 0; }
+.usb-account-identity > img { width: 32px; height: 32px; flex-shrink: 0; border-radius: 6px; padding: 3px; background: #fff; object-fit: contain; }
 .usb-account-name { width: 100%; margin-top: 4px; flex-shrink: 0; text-align: center; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .usb-account-values { flex: 1; display: flex; width: 100%; flex-direction: column; justify-content: space-evenly; align-items: center; gap: 2px; padding-top: 3px; min-height: 0; }
 .usb-account-limit { width: 100%; text-align: center; }
@@ -41,3 +42,24 @@
 .usb-screen strong.quota-blue { color: var(--quota-blue); }
 .usb-screen strong.quota-green { color: var(--quota-green); }
 .usb-platform footer strong, .usb-countdown { color: #000; }
+
+.usb-account-viewport { height: 100%; overflow: hidden; }
+.usb-account-track { display: flex; height: 100%; transition: transform 650ms ease-in-out; }
+.usb-account-columns { width: 100%; flex: 0 0 100%; }
+.usb-accounts-1 .usb-account-card, .usb-accounts-2 .usb-account-card { border-right: 0; border-bottom: 0; padding: 10px 12px; }
+.usb-accounts-1 .usb-account-identity { flex-direction: row; gap: 10px; }
+.usb-accounts-1 .usb-account-name { text-align: left; margin: 0; font-size: 20px; flex: 1; min-width: 0; }
+.usb-accounts-1 .usb-account-identity > img { width: 38px; height: 38px; }
+.usb-accounts-1 .usb-account-values, .usb-accounts-2 .usb-account-values { flex-direction: row; padding-top: 0; gap: 8px; }
+.usb-accounts-1 .usb-account-limit strong { font-size: 36px; line-height: 46px; }
+.usb-accounts-1 .usb-account-limit > span { font-size: 26px; line-height: 34px; white-space: nowrap; }
+.usb-accounts-2 .usb-account-card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 8px; }
+.usb-accounts-2 .usb-account-card:first-child { border-bottom: 1px solid color-mix(in srgb, var(--border) 25%, transparent); }
+.usb-accounts-2 .usb-account-values { height: 100%; }
+.usb-accounts-2 .usb-account-limit strong { font-size: 26px; line-height: 32px; }
+.usb-accounts-2 .usb-account-limit > span { font-size: 20px; line-height: 26px; white-space: nowrap; }
+.usb-portrait .usb-accounts-1 .usb-account-values { flex-direction: column; }
+.usb-portrait .usb-accounts-2 .usb-account-card { display: flex; }
+.usb-portrait .usb-accounts-2 .usb-account-limit strong { font-size: 22px; }
+.usb-portrait .usb-accounts-2 .usb-account-limit > span { font-size: 18px; }
+@media (prefers-reduced-motion: reduce) { .usb-account-track { transition: none; } }

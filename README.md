@@ -1,8 +1,15 @@
 # AIDE monitor
 
-AIDE monitor（AI IDE monitor），专业的 AI IDE 订阅额度监视器。集中监控多账号配额与恢复时间，支持桌面悬浮窗和独立监视屏，基于 Tauri 2、Rust、React。当前版本 **0.6.1**。
+AIDE monitor（AI IDE monitor），专业的 AI IDE 订阅额度监视器。集中监控多账号配额与恢复时间，支持桌面悬浮窗和独立监视屏，基于 Tauri 2、Rust、React。当前版本 **0.6.2**。
 
 [个人主页](https://zakee.fun) · [爱发电 / Buy Me a Coffee](https://ifdian.net/a/zakee/plan) · [下载最新版](https://github.com/zakee039/AIDE-monitor/releases/latest)
+
+## 0.6.2
+
+- 独立监视屏薄荷、白昼按账号数量切换布局：单账号两项额度并排，双账号上下两行，三四账号保持竖列。
+- 超过四个账号每 8 秒横向滑动切换一页，保持账号额度、重置时间与颜色规则。
+
+[0.6.2 版本说明](docs/releases/v0.6.2.md)
 
 ## 0.6.1
 
@@ -104,7 +111,7 @@ powershell -ExecutionPolicy Bypass -File tools/build-artifacts.ps1
 .\tools\pack-theme.ps1
 ```
 
-发布产物统一位于 `artifacts/release-v0.6.1/`，包括独立运行 EXE、安装包、便携 ZIP 与 SHA-256 校验文件。本版继续使用已有应用标识以保留账号设置；旧第三方 JSON 主题不迁移。
+发布产物统一位于 `artifacts/release-v0.6.2/`，包括独立运行 EXE、安装包、便携 ZIP 与 SHA-256 校验文件。本版继续使用已有应用标识以保留账号设置；旧第三方 JSON 主题不迁移。
 
 ## 项目资料
 
