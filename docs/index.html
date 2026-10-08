@@ -1,32 +1,37 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#f8f7f0">
-  <title>AIDE monitor · 让额度清楚可见</title>
-  <meta name="description" content="AIDE monitor：集中查看 ChatGPT、Claude、Antigravity、Grok 多账号额度与重置时间。支持桌面悬浮窗、悬浮球与独立监视屏。">
-  <meta property="og:title" content="AIDE monitor · 让额度清楚可见">
-  <meta property="og:description" content="四大平台额度，一处查看。把额度，放到独立小屏上。">
-  <meta property="og:image" content="media/cover.webp">
-  <link rel="icon" href="assets/aide-mark.svg"><link rel="stylesheet" href="site.css">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#fbf9f2"><title>AIDE monitor · 让额度清楚可见</title>
+<meta name="description" content="四大平台额度，一处查看。AIDE monitor 集中监控多个 AI 账号的剩余额度与重置时间，支持桌面悬浮窗和独立监视屏。">
+<link rel="icon" href="assets/aide-mark.svg"><link rel="stylesheet" href="site.css">
 </head>
 <body>
-<header>
-  <a class="brand" href="#1" aria-label="返回首页"><img src="assets/aide-mark.svg" alt=""><strong>AIDE monitor</strong><span>YOUR QUOTA. IN SIGHT.</span></a>
-  <nav aria-label="主导航"><a class="github" href="https://github.com/zakee039/AIDE-monitor">GitHub ↗</a><a class="download" href="https://github.com/zakee039/AIDE-monitor/releases/latest">下载 Windows 版 <span>↗</span></a></nav>
+<header class="site-header">
+<a class="brand" href="#home"><img src="assets/aide-mark.svg" alt=""><strong>AIDE monitor</strong><span>YOUR QUOTA. IN SIGHT.</span></a>
+<nav aria-label="主导航"><div class="language-switch" role="group" aria-label="Language"><button data-lang="zh-CN" aria-pressed="true">中文</button><button data-lang="en" aria-pressed="false">English</button></div><a class="download" href="https://github.com/zakee039/AIDE-monitor/releases/latest">下载 ↗</a></nav>
 </header>
 <main>
-  <h1 class="sr-only">AIDE monitor：四大平台额度，一处查看</h1>
-  <div class="chapter-nav" aria-label="展示章节"></div>
-  <button class="scene" id="scene" aria-label="查看下一张展示画面">
-    <img id="slide" src="assets/showcase/01-0.webp" alt="AIDE monitor，额度都看得见，八个演示账号集中查看" fetchpriority="high" width="1800" height="820">
-  </button>
-  <div class="caption-row"><span id="kind">演示数据</span><p id="caption" aria-live="polite">AI 工具越用越多，额度还要来回查？</p><span id="counter">01 / 09</span></div>
-  <div class="controls"><span class="hint">点击画面继续 · 支持 ← → 方向键</span><div><button id="previous" aria-label="上一张">←</button><button id="next" aria-label="下一张">→</button></div></div>
-  <noscript><p>启用 JavaScript 可翻页浏览。<a href="https://github.com/zakee039/AIDE-monitor/releases/latest">下载应用</a>。</p></noscript>
+<section class="scene hero" id="home">
+<div class="copy"><div class="eyebrow">01 / A LITTLE MORE FOCUS</div><h1>额度看得见，<br>专注<span>不断线。</span></h1><p>不用来回打开每个平台。<br>把 AI 账号的额度，轻轻放在眼前。</p><div class="metric"><strong>4<small>大平台</small></strong><div><b>一个小窗口</b><span>多账号 · 剩余额度 · 重置时间</span></div></div><div class="actions"><a class="download" href="https://github.com/zakee039/AIDE-monitor/releases/latest">下载 Windows 版 ↗</a><a class="text-link" href="#platforms">继续了解 →</a></div><small class="note">Windows x64 · 桌面悬浮窗与独立监视屏</small></div>
+<div class="visual hero-visual"><figure class="window hero-window"><figcaption><span class="dot"></span>一点薄荷，一目了然。<span>↗</span></figcaption><img src="assets/product/hud-default.png" alt="薄荷初音桌面悬浮窗，展示八个演示账号的额度与重置时间"><div class="window-foot">你的额度小伙伴。<em>just a glance ♡</em></div></figure><div class="orb-note"><img src="assets/product/orb.png" alt="折叠悬浮球显示估算总额度"><span>轻轻收起，<br>重点还在。</span></div></div>
+</section>
+<section class="scene" id="platforms">
+<div class="copy"><div class="eyebrow">02 / ALL IN ONE PLACE</div><h2>四大平台，<br>一处<span>查看。</span></h2><p>哪个账号还有额度，什么时候重置。<br>看一眼，心里就有数。</p><div class="choices" id="platform-choices" role="group" aria-label="选择展示平台"><button data-provider="codex" aria-pressed="true">ChatGPT / Codex</button><button data-provider="antigravity" aria-pressed="false">Antigravity</button><button data-provider="claude" aria-pressed="false">Claude</button><button data-provider="grok" aria-pressed="false">Grok</button></div><p class="detail" id="platform-detail">短周期与周额度，各自清楚显示。</p></div>
+<figure class="window platform-window"><figcaption><span class="traffic">● ● ●</span><b id="platform-label">ChatGPT / Codex</b><span>额度预览</span></figcaption><div class="screenshot-well"><img id="platform-shot" src="assets/product/platform-codex.png" alt="ChatGPT / Codex 两个演示账号的额度"></div><div class="window-foot">界面演示 · 账号与额度均为虚构<span>清楚，不复杂。</span></div></figure>
+</section>
+<section class="scene monitor-scene" id="monitor">
+<div class="copy"><div class="eyebrow">03 / A SPACE OF ITS OWN</div><h2>把额度，放到<br><span>独立小屏上。</span></h2><p>工作留在主屏，额度自有位置。<br>一块桌面小屏，让状态随时可见。</p><div class="monitor-choices" role="group" aria-label="选择独立监视屏展示"><button data-monitor="1account" aria-pressed="true">单账号</button><button data-monitor="2account" aria-pressed="false">双账号</button><button data-monitor="3account" aria-pressed="false">三账号</button><button data-monitor="4account" aria-pressed="false">四账号</button><button data-monitor="4plat" aria-pressed="false">四平台</button></div><div class="feature"><span id="monitor-number">01</span><div><b id="monitor-title">两项额度，左右并排</b><small id="monitor-detail">账号数量不同，布局随之适应。</small></div></div><span class="pill">独立主题 · 自适应布局</span></div>
+<figure class="photo-card"><img id="monitor-shot" src="assets/product/1account.png" alt="独立监视屏单账号布局设备实拍" loading="lazy"><figcaption><span class="dot"></span>桌面上的一小块安心。<small>设备实拍</small></figcaption></figure>
+</section>
+<section class="scene settings-scene" id="personal">
+<div class="copy"><div class="eyebrow">04 / MAKE IT YOURS</div><h2>照你的习惯，<br>刚刚<span>好。</span></h2><p>想看哪些账号，多久刷新一次。<br>每一个小习惯，都有自己的位置。</p><div class="choices" role="group" aria-label="选择设置预览"><button data-settings="accounts" aria-pressed="true">账号管理</button><button data-settings="display" aria-pressed="false">窗口与显示</button></div><div class="feature"><span>01</span><div><b>每个账号，单独安排</b><small>勾选展示 · 独立代理 · 刷新频率</small></div></div><div class="feature"><span>02</span><div><b>舒服的窗口，顺手的设置</b><small>置顶 · 位置锁定 · 隐私模式</small></div></div><div class="hand">是喜欢的样子呀 ♡</div></div>
+<figure class="window settings-window"><figcaption><span class="traffic">● ● ●</span><b id="settings-label">AIDE monitor / 账号管理</b><span>设置预览</span></figcaption><div class="settings-image"><img id="settings-shot" src="assets/product/settings-accounts.png" alt="账号管理设置界面，展示账号勾选、代理和刷新频率" loading="lazy"></div></figure>
+</section>
+<section class="scene ending" id="download">
+<div class="copy"><div class="eyebrow">05 / READY WHEN YOU ARE</div><h2>少一点查询，<br><span>多一点专注。</span></h2><p>让额度清楚可见。<br>接下来，好好创作。</p><div class="actions"><a class="download large" href="https://github.com/zakee039/AIDE-monitor/releases/latest">下载 AIDE monitor ↗</a></div><div class="ending-links"><a href="https://github.com/zakee039/AIDE-monitor">GitHub ↗</a><a href="https://github.com/zakee039/AIDE-monitor#使用">使用说明 ↗</a></div><small class="note">前往 GitHub Releases，选择安装包或便携版。</small></div><div class="ending-art" aria-hidden="true"><div class="mint-ring"></div><img src="assets/aide-mark.svg" alt=""><span>AIDE monitor</span><small>YOUR QUOTA. IN SIGHT.</small></div>
+</section>
 </main>
-<footer><span>让额度清楚可见，让专注持续在线。</span><a href="https://github.com/zakee039/AIDE-monitor#使用">使用说明 ↗</a><a href="https://zakee.fun">作者主页 ↗</a></footer>
-
 <script src="site.js" defer></script>
 </body>
 </html>
