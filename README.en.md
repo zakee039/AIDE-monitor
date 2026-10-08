@@ -5,7 +5,9 @@
 <a href="README.en.md"><img height="28" src=".github/assets/readme/en-active.svg" alt="English" /></a>
 </p>
 
-AIDE monitor (AI IDE monitor) brings the quota and reset times of multiple AI accounts into one view. Built with Tauri 2, Rust and React, it supports a desktop widget and a dedicated display. Current version: **0.6.2**.
+**Your quota in sight. Your focus uninterrupted.**
+
+AIDE monitor is a Windows desktop tool for monitoring AI account quotas. View quota balances and reset times for ChatGPT / Codex, Claude, Antigravity and Grok in a desktop widget or on a dedicated display, with less switching between platforms.
 
 <p>
 <a href="https://aide.zakee.fun"><img height="28" src=".github/assets/readme/preview-en.svg" alt="Live preview" /></a>
@@ -16,51 +18,44 @@ AIDE monitor (AI IDE monitor) brings the quota and reset times of multiple AI ac
 
 **Preview: [aide.zakee.fun](https://aide.zakee.fun)**
 
-## What's new in 0.6.2
+## See your quotas at a glance
 
-- Mint and Daylight dedicated-display themes adapt to the account count: one account shows two quota windows side by side; two accounts use two rows; three or four accounts use columns.
-- More than four accounts slide to the next page every eight seconds, retaining quota values, reset times and quota colors.
+- **Four platforms in one place:** view remaining quota and reset countdowns across multiple accounts. Supports Codex, Claude OAuth, Antigravity and Grok CLI OAuth.
+- **Always within reach:** keep the desktop widget on top, lock its position or hide account names. Collapse it into an orb to see the selected platform's total quota.
+- **Account-level controls:** select, reorder and rename accounts, with independent proxies and refresh intervals for each account.
+- **A dedicated display:** move quota monitoring to a separate screen. Landscape, portrait and high-DPI displays are supported; the window hides on disconnection and returns when the display reconnects.
+- **Choose your appearance:** desktop themes include Miku Mint, Dark and Light, with custom theme support. Dedicated-display themes are configured separately.
 
-[0.6.2 release notes (Chinese)](docs/releases/v0.6.2.md)
+## Dedicated display
 
-## Features
+Mint and Daylight adapt to the account count: one account shows two quota windows side by side, two accounts use two rows, and three or four accounts use columns. More than four accounts switch pages every eight seconds.
 
-- **Four platforms:** Codex, Claude OAuth, Antigravity and Grok CLI OAuth. View multiple accounts together, including remaining quota and reset times.
-- **Compact desktop widget:** keep it on top, lock its position, hide account names with privacy mode, or collapse it into a quota orb. The tray menu restores a hidden window.
-- **Per-platform totals:** the orb estimates quota separately for the selected platform, accounting for subscription multipliers and supported quota windows. Missing or failed readings are never treated as full quota.
-- **Per-account settings:** choose which accounts to display, reorder or rename them, and assign independent proxies and refresh intervals. Account refresh options can inherit the global setting or override it; disabling automatic refresh does not prevent manual refresh.
-- **Dedicated display:** a separate, borderless window adapts to landscape, portrait and high-DPI screens. Desktop and dedicated-display themes have independent settings and formats.
-- **Flexible themes:** desktop themes include Miku Mint, Dark and Light, with support for executable `.aidetheme` widget packages. Dedicated displays provide Mint, Daylight and Four Platforms themes, plus dedicated JSON theme imports that do not execute scripts.
+The Four Platforms theme shows each platform's total quota or recovery countdown, its nearest quota reset countdown, and the number of selected accounts. Desktop and dedicated-display themes can be chosen independently.
 
-The Four Platforms dedicated-display theme shows each platform's calculated total quota or recovery countdown, the nearest quota reset countdown, and the number of selected accounts. Unknown values remain unknown. Quota colors use the same thresholds as the main interface: red below 20%, orange below 50%, blue below 80%, and green at 80% or above.
+Displays must appear in Windows display settings. Devices using proprietary USB image-transfer protocols require separate integration.
 
-Antigravity's built-in account view displays Gemini quota. Claude and Antigravity conversion ratios are provisional estimates. See [quota rules (Chinese)](docs/DOMAIN.md) for calculation details.
+## Download and get started
 
-## Download and use
+Download the Windows x64 installer or portable version from [GitHub Releases](https://github.com/zakee039/AIDE-monitor/releases/latest). WebView2 is required.
 
-Download the Windows x64 installer, standalone executable or portable ZIP from [GitHub Releases](https://github.com/zakee039/AIDE-monitor/releases/latest). WebView2 is required.
-
-1. In **Settings → General → Data sources**, select your account source.
-2. In **Accounts**, select the accounts you want to display.
-3. Choose your desktop theme and configure refresh intervals as needed.
-4. To use a dedicated display, select its target screen and theme in the dedicated-display settings.
+1. Open **Settings → General → Data sources** and select your account source.
+2. In **Accounts**, select the accounts to display and configure refresh intervals as needed.
+3. Choose a desktop theme to start monitoring. Use the system tray to restore a hidden widget.
+4. To use a dedicated display, select its target screen and theme in the corresponding settings, then enable it.
 
 Supported sources include official clients, Cockpit Tools, CC Switch, CLIProxyAPI and local Sub2API exports. Login files are read without modifying the original accounts or executing custom balance scripts. If a login expires, sign in again in the original client.
 
-Dedicated displays must be visible in Windows display settings. Devices using proprietary USB image-transfer protocols require separate integration. The application remembers the selected display, hides its window on disconnection, and restores it when that display reconnects.
+## Understanding quota values
 
-If a custom desktop theme fails to load, use **Restore built-in theme** from the tray menu.
+Totals are calculated separately for each platform. The orb accounts for subscription multipliers and quota windows to estimate available capacity; see the [quota calculation guide (Chinese)](docs/DOMAIN.md) for details. Claude and Antigravity conversion ratios are provisional estimates. Antigravity's built-in account view displays Gemini quota.
 
-## Recent releases
+Quota colors run from red (below 20%) to orange (below 50%), blue (below 80%) and green (80% or above). Failed queries and missing data appear as unknown, never as full quota.
 
-- **0.6.1:** refined dedicated-display account columns, larger icons and names, clearer reset countdowns, automatic paging and shared quota color thresholds. [Notes](docs/releases/v0.6.1.md)
-- **0.6.0:** unified theme-selector controls, independent desktop and dedicated-display themes, Four Platforms display, and dedicated JSON theme imports. [Notes](docs/releases/v0.6.0.md)
-- **0.5.3:** platform selection follows selected accounts and falls back automatically when necessary. [Notes](docs/releases/v0.5.3.md)
-- **0.5.2:** independent totals for four platforms, subscription multipliers and quota conversion settings. [Notes](docs/releases/v0.5.2.md)
-- **0.5.1:** per-account proxies, recovery recommendation fixes and release update checks. [Notes](docs/releases/v0.5.1.md)
-- **0.5.0:** executable widget themes, theme SDK, isolated preferences and automatic fallback. [Notes](docs/releases/v0.5.0.md)
+## Custom themes
 
-Release notes linked above are in Chinese.
+The desktop supports `.aidetheme` Widget packages. If a theme fails to load, select **Restore built-in theme** from the tray menu. Dedicated displays support separate JSON themes for colors and layout, without script execution. The two theme formats are independent.
+
+[Desktop theme development](docs/THEMES.md) · [Theme SDK](theme-sdk) · [Dedicated-display theme examples](examples/usb-themes)
 
 ## Development and validation
 
@@ -87,11 +82,11 @@ Results are written to `artifacts/native-smoke.json` and `artifacts/theme-smoke.
 .\tools\pack-theme.ps1
 ```
 
-Release artifacts are stored in `artifacts/release-v0.6.2/`, including the standalone executable, installer, portable ZIP and SHA-256 checksums. Existing account settings are retained using the application's established identifier. Legacy third-party JSON desktop themes are not migrated.
+Release artifacts are stored in `artifacts/release-v<version>/`, including the standalone executable, installer, portable ZIP and SHA-256 checksums.
 
 ## Project documentation
 
-[Architecture](docs/ARCHITECTURE.md) · [API](docs/API.md) · [Theme development](docs/THEMES.md) · [Theme SDK](theme-sdk) · [Dedicated-display theme examples](examples/usb-themes) · [Upstream references](docs/UPSTREAM.md) · [UI plans](界面更新规划.md)
+[Releases](https://github.com/zakee039/AIDE-monitor/releases) · [Architecture](docs/ARCHITECTURE.md) · [API](docs/API.md) · [Theme development](docs/THEMES.md) · [Theme SDK](theme-sdk) · [Dedicated-display theme examples](examples/usb-themes) · [Upstream references](docs/UPSTREAM.md) · [UI plans](界面更新规划.md)
 
 Most project documentation is currently in Chinese.
 
