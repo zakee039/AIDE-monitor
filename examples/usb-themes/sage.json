@@ -1,0 +1,16 @@
+{
+  "kind": "aide-usb-theme",
+  "version": 1,
+  "width": 320,
+  "height": 170,
+  "id": "usb-custom-sage",
+  "name": "青竹",
+  "layout": "columns",
+  "palette": {
+    "background": "#F0F5EE",
+    "text": "#294638",
+    "textMuted": "#65776B",
+    "border": "#A3B5A4",
+    "success": "#287451"
+  }
+}

@@ -1,3 +1,5 @@
+pub const THEMES: [&str; 3] = ["usb-mint", "usb-day", "usb-quad"];
+
 use crate::{model::ApiError, service::Service};
 use serde::Serialize;
 use tauri::{Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -102,7 +104,7 @@ pub fn sync(app: &tauri::AppHandle) {
             "usb-display",
             WebviewUrl::App("index.html?view=usb".into()),
         )
-        .title("AIDE monitor · USB")
+        .title("AIDE monitor · 独立监视屏")
         .decorations(false)
         .shadow(false)
         .maximizable(false)
@@ -179,5 +181,55 @@ mod tests {
         assert!(
             remembered_device(vec![display("saved", 0), display("saved", 800)], "saved").is_none()
         );
+    }
+}
+
+pub fn valid_theme(theme: &crate::model::UsbThemeDefinition) -> bool {
+    let keys = ["background", "text", "textMuted", "border", "success"];
+    theme.kind == "aide-usb-theme" && theme.version == 1
+        && theme.width == 320 && theme.height == 170
+        && theme.id.starts_with("usb-custom-") && theme.id.len() <= 80
+        && theme.id.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+        && !theme.name.trim().is_empty() && theme.name.chars().count() <= 40
+        && !theme.name.chars().any(char::is_control)
+        && matches!(theme.layout.as_str(), "rows" | "columns")
+        && theme.palette.len() == keys.len()
+        && keys.iter().all(|key| theme.palette.get(*key).is_some_and(|v|
+            v.len() == 7 && v.starts_with('#') && v.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit)))
+}
+pub fn valid_settings(settings: &crate::model::UsbDisplaySettings) -> bool {
+    let mut ids = std::collections::HashSet::new();
+    settings.custom_themes.len() <= 20
+        && settings.custom_themes.iter().all(|theme| valid_theme(theme) && ids.insert(&theme.id))
+        && (THEMES.contains(&settings.theme_id.as_str()) || settings.custom_themes.iter().any(|t| t.id == settings.theme_id))
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::*;
+    #[test]
+    fn usb_import_rejects_desktop_documents_and_css_and_preserves_custom_theme() {
+        let theme: crate::model::UsbThemeDefinition = serde_json::from_str(include_str!("../../examples/usb-themes/sage.json")).unwrap();
+        assert!(valid_theme(&theme));
+        let mut settings = crate::model::UsbDisplaySettings::default();
+        settings.theme_id = theme.id.clone();
+        settings.custom_themes.push(theme.clone());
+        assert!(valid_settings(&settings));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut config = crate::config::Config::default();
+        config.settings.usb_display = settings.clone();
+        crate::config::atomic_json(&path, &config).unwrap();
+        assert_eq!(crate::config::load(&path).unwrap().settings.usb_display, settings);
+        settings.custom_themes.push(theme.clone());
+        assert!(!valid_settings(&settings));
+        let mut invalid = theme.clone();
+        invalid.palette.insert("background".into(), "url(https://example.com)".into());
+        assert!(!valid_theme(&invalid));
+        invalid = theme.clone(); invalid.id = "default".into();
+        assert!(!valid_theme(&invalid));
+        invalid = theme; invalid.width = 640;
+        assert!(!valid_theme(&invalid));
+        assert!(serde_json::from_str::<crate::model::UsbThemeDefinition>(include_str!("../../examples/themes/cream/theme.json")).is_err());
     }
 }

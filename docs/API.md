@@ -15,7 +15,7 @@
 
 `Settings.display.positionLocked` 控制悬浮窗及主题窗口的拖动。
 
-`Settings.usbDisplay` 为 `{ enabled, deviceId, themeId }`，整体写入；主题限三套内置主题。`deviceId` 为 Windows 监视器接口路径，不使用易变的显示器编号。配置修改继续要求 `expectedRevision`。设置窗口可通过 `aide_usb_displays` 获取当前连接屏幕；USB 窗口只获读取权限。
+`Settings.usbDisplay` 为 `{ enabled, deviceId, themeId, customThemes? }`，整体写入；独立监视屏主题使用 usb-mint、usb-day、usb-quad 或专用导入主题，不能使用桌面主题 ID。`deviceId` 为 Windows 监视器接口路径，不使用易变的显示器编号。配置修改继续要求 `expectedRevision`。设置窗口可通过 `aide_usb_displays` 获取当前连接屏幕；独立监视屏窗口只获读取权限。
 
 ## 0.5.1 设置扩展
 

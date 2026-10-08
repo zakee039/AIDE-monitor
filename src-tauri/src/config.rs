@@ -42,7 +42,7 @@ pub fn load(path: &Path) -> Result<Config, ApiError> {
     if bytes.len() > 1024 * 1024 {
         return Err(ApiError::new("IO_ERROR", "HUD 设置文件过大"));
     }
-    let config: Config = serde_json::from_slice(&bytes)
+    let mut config: Config = serde_json::from_slice(&bytes)
         .map_err(|_| ApiError::new("IO_ERROR", "HUD 设置损坏，请先保留原文件并重新设置"))?;
     if config.config_version != 1
         || !(60..=1800).contains(&config.settings.refresh_interval_seconds)
@@ -52,6 +52,11 @@ pub fn load(path: &Path) -> Result<Config, ApiError> {
             "VERSION_UNSUPPORTED",
             "HUD 设置版本或数值不受支持",
         ));
+    }
+    // Desktop theme IDs and obsolete USB IDs are not accepted by the USB renderer.
+    if !crate::usb_display::valid_settings(&config.settings.usb_display) {
+        config.settings.usb_display.custom_themes.clear();
+        config.settings.usb_display.theme_id = "usb-mint".into();
     }
     Ok(config)
 }
@@ -87,6 +92,23 @@ mod tests {
         assert_eq!(load(&path).unwrap().settings.refresh_interval_seconds, 120);
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
     }
+    #[test]
+    fn obsolete_usb_theme_resets_without_changing_desktop_theme_or_monitor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut config = Config::default();
+        config.settings.active_theme_id = "paper".into();
+        config.settings.usb_display.theme_id = "paper".into();
+        config.settings.usb_display.device_id = "saved-monitor".into();
+        config.settings.usb_display.enabled = true;
+        atomic_json(&path, &config).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.settings.usb_display.theme_id, "usb-mint");
+        assert_eq!(loaded.settings.active_theme_id, "paper");
+        assert_eq!(loaded.settings.usb_display.device_id, "saved-monitor");
+        assert!(loaded.settings.usb_display.enabled);
+    }
+
     #[test]
     fn corrupt_config_is_not_silently_overwritten() {
         let dir = tempfile::tempdir().unwrap();

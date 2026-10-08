@@ -1,6 +1,19 @@
 # AIDE monitor
 
-AIDE monitor（AI IDE monitor），专业的 AI IDE 订阅额度监视器。集中监控多账号配额与恢复时间，支持桌面悬浮窗和 USB 屏幕，基于 Tauri 2、Rust、React。当前版本 **0.5.3**。
+AIDE monitor（AI IDE monitor），专业的 AI IDE 订阅额度监视器。集中监控多账号配额与恢复时间，支持桌面悬浮窗和独立监视屏，基于 Tauri 2、Rust、React。当前版本 **0.6.0**。
+
+[个人主页](https://zakee.fun) · [爱发电 / Buy Me a Coffee](https://ifdian.net/a/zakee/plan) · [下载最新版](https://github.com/zakee039/AIDE-monitor/releases/latest)
+
+## 0.6.0
+
+- 桌面与独立监视屏统一主题选择界面：导入、横向选择器、实时预览和应用按钮。选择只预览，点击应用后生效。
+- 桌面小窗和悬浮球在同一行预览；两套主题保持独立，不混用配色、布局或主题包。
+- USB 监视屏统一更名为“独立监视屏”，设备设置置顶，去除分辨率和冗余说明。屏幕布局自适应横屏、竖屏和高 DPI。
+- 独立监视屏提供薄荷初音、白昼和四平台主题；四平台按 ChatGPT、Claude、Antigravity、Grok 分别累计额度，复用悬浮球计算规则。
+- 四平台可用时显示百分比，等待恢复时显示双行倒计时，底部仅显示已选账号数量；缺失数据保持未知。
+- 支持导入独立监视屏专用 JSON 主题，包含颜色和布局配置，不执行脚本。[主题示例与格式](examples/usb-themes)
+
+[0.6.0 版本说明](docs/releases/v0.6.0.md)
 
 ## 0.5.3
 
@@ -24,7 +37,7 @@ AIDE monitor（AI IDE monitor），专业的 AI IDE 订阅额度监视器。集�
 - 常规设置新增多组代理，每行包含名称和地址，输入即自动保存，支持 HTTP / HTTPS / SOCKS5 / SOCKS5H。
 - 每个账号可独立选择代理，默认“系统”，使用系统/环境代理设置；删除代理后关联账号恢复为系统。无效或无法连接的显式代理会报错，不静默回退。
 - 修复已耗尽窗口与服务端总许可标记不同步时，漏选最早恢复账号的问题。5h 低于 5%、7d 低于 2% 不可用，恰好 5% / 2% 可用；只对不足窗口取最晚重置，再从各账号中选最早恢复者。
-- 去除 USB 屏幕设置的状态行，更新关于页介绍，修正 `available` 拼写。
+- 去除独立监视屏设置的状态行，更新关于页介绍，修正 `available` 拼写。
 - 关于 → 版本更新通过 GitHub Releases 检查最新正式版，展示更新说明并打开 GitHub 下载页面。
 
 [0.5.1 版本说明](docs/releases/v0.5.1.md)
@@ -39,7 +52,7 @@ AIDE monitor（AI IDE monitor），专业的 AI IDE 订阅额度监视器。集�
 
 [版本说明](docs/releases/v0.5.0.md) · [主题开发](docs/THEMES.md) · [SDK](theme-sdk) · [接口说明](docs/API.md) · [GitHub](https://github.com/zakee039/AIDE-monitor)
 
-## 本次更新
+## 桌面与屏幕功能
 
 - 薄荷初音底栏头像由 22px 放大为 32px，并收紧左侧及底部留白至约 3px。
 
@@ -47,8 +60,8 @@ AIDE monitor（AI IDE monitor），专业的 AI IDE 订阅额度监视器。集�
 - 窗口与显示可锁定位置，包括收起的圆窗和第三方主题拖动。
 - 展开/收起在原生窗口尺寸及右边缘定位完成后显示，避免圆窗先在左侧闪现。
 - 三套内置主题：miku mint / 薄荷初音、dark / 黑暗、white / 明亮。薄荷初音加入可伸缩葱分隔线和头像。
-- USB 屏幕使用独立、无边框、不可缩放的全屏展示窗口；三套内置主题等比适配横屏、竖屏及高 DPI。按 Windows 显示器接口身份记忆设备，断线隐藏，不选择其他屏幕，重连自动恢复。
-- USB 模式支持 Windows 显示设置中可见的显示器；厂商私有 USB 传图设备需单独适配。首次使用在设置中选择目标屏幕。该窗口使用独立主题，不影响悬浮窗主题。
+- 独立监视屏使用独立、无边框、不可缩放的全屏展示窗口；主题自适应横屏、竖屏及高 DPI，四平台竖屏采用两行排列。按 Windows 显示器接口身份记忆设备，断线隐藏，不选择其他屏幕，重连自动恢复。
+- 独立监视屏模式支持 Windows 显示设置中可见的显示器；厂商私有 USB 传图设备需单独适配。首次使用在设置中选择目标屏幕。该窗口使用独立主题，不影响悬浮窗主题。
 
 ## 使用
 
@@ -83,7 +96,7 @@ powershell -ExecutionPolicy Bypass -File tools/build-artifacts.ps1
 .\tools\pack-theme.ps1
 ```
 
-发布产物统一位于 `artifacts/release-v0.5.3/`，包括独立运行 EXE、安装包、便携 ZIP 与 SHA-256 校验文件。本版继续使用已有应用标识以保留账号设置；旧第三方 JSON 主题不迁移。
+发布产物统一位于 `artifacts/release-v0.6.0/`，包括独立运行 EXE、安装包、便携 ZIP 与 SHA-256 校验文件。本版继续使用已有应用标识以保留账号设置；旧第三方 JSON 主题不迁移。
 
 ## 项目资料
 

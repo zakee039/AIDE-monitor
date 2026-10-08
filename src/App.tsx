@@ -1,3 +1,4 @@
+import { UsbScreen } from "./UsbScreen";
 import { QuotaSettings } from "./QuotaSettings";
 import { ProxySettings } from "./ProxySettings";
 import { UpdatePanel } from "./UpdatePanel";
@@ -12,7 +13,7 @@ import type { AccountAvailability, AccountQuota, AccountSummary, Capabilities, D
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, CircleAlert, EyeOff, Database, Info, Layers3, LoaderCircle, Palette, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, X } from "lucide-react";
 import { call, desktop, errorMessage, hud, internal, type SourceOption } from "./api";
-import { defaultTheme, themeStyle, type ThemeDocument } from "./themes";
+import { defaultTheme, midnightTheme, paperTheme, themeStyle, type ThemeDocument } from "./themes";
 
 interface AppState {
   snapshot: Snapshot | null;
@@ -73,7 +74,7 @@ function useHudState() {
       while (dirty.current && mounted.current) {
         dirty.current = false;
         const [snapshot, accounts, settings, themes, capabilities, sourcePath, theme] = await Promise.all([
-          call("quota.snapshot.get", {}), call("accounts.list", {}), call("settings.get", {}), call("themes.list", {}), call("capabilities.get", {}), !desktop || new URLSearchParams(location.search).get("view") === "settings" ? internal("source_get", {}) : Promise.resolve({ path: null }), internal("theme_get", {}),
+          call("quota.snapshot.get", {}), call("accounts.list", {}), call("settings.get", {}), call("themes.list", {}), call("capabilities.get", {}), !desktop || new URLSearchParams(location.search).get("view") === "settings" ? internal("source_get", {}) : Promise.resolve({ path: null }), usbView ? Promise.resolve(defaultTheme) : internal("theme_get", {}),
         ]);
         if (!mounted.current) break;
         const newestEvent = observed.current;
@@ -153,22 +154,6 @@ export default function App() {
   useEffect(()=>{if(desktop&&!settingsView&&!usbView&&!collapsed)void invoke('aide_theme_resume').catch(()=>{});},[collapsed,settingsView]);
   const panelRef = useRef<HTMLDivElement>(null);
   const layoutQueue = useRef<Promise<unknown>>(Promise.resolve());
-  useEffect(() => {
-    if (!usbView || !panelRef.current) return;
-    const panel = panelRef.current;
-    const fit = () => {
-      const scale = Math.min((window.innerWidth - 24) / Math.max(1, panel.offsetWidth), (window.innerHeight - 24) / Math.max(1, panel.offsetHeight));
-      panel.style.transform = `translate(-50%, -50%) scale(${Math.max(.05, scale)})`;
-    };
-    const observer = new ResizeObserver(fit);
-    observer.observe(panel);
-    window.addEventListener("resize", fit);
-    fit();
-    return () => { observer.disconnect(); window.removeEventListener("resize", fit); };
-  }, [loading, state.theme.id]);
-
-
-
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   useEffect(() => {
     if (!desktop || settingsView || usbView) return;
@@ -229,16 +214,16 @@ export default function App() {
     if (desktop) void perform("settings", () => call("window.control", { action: "open_settings" }));
     else { setSettingsView(true); history.replaceState(null, "", "?view=settings"); }
   };
-  return localize(<main style={usbView ? themeStyle(state.theme) : undefined} onMouseDownCapture={event => {
+  return localize(<main onMouseDownCapture={event => {
     if (!settingsView && (state.settings?.display.positionLocked || usbView) && (event.target as HTMLElement).closest('[data-tauri-drag-region],.quota-orb')) event.stopPropagation();
   }} className={`app-stage ${desktop ? "desktop" : "browser"} ${settingsView ? "settings-stage" : "hud-stage"} ${usbView ? "usb-stage" : ""} ${state.settings?.display.positionLocked || usbView ? "position-locked" : ""}`}>
     {settingsView ?
       <SettingsView state={state} loading={loading} error={actionError ?? readError} notice={notice} busy={busy} perform={perform} reload={reload} onBack={() => { setSettingsView(false); history.replaceState(null, "", location.pathname); }} /> :
-      <div ref={panelRef} className={`hud-shell ${collapsed ? "is-collapsed" : ""} ${transitioning ? "is-transitioning" : ""} theme-${state.theme.id}`} style={themeStyle(state.theme)}>
-        {collapsed && state.snapshot ? <QuotaOrb locked={state.settings?.display.positionLocked ?? false} snapshot={state.snapshot} now={now} onExpand={() => setCollapsed(false)} /> : loading && !state.snapshot ? <div className="hud-empty" data-tauri-drag-region>正在读取配额…</div> : state.snapshot ?
+      <div ref={panelRef} className={`hud-shell ${collapsed ? "is-collapsed" : ""} ${transitioning ? "is-transitioning" : ""} ${usbView ? "" : `theme-${state.theme.id}`}`} style={usbView ? undefined : themeStyle(state.theme)}>
+        {usbView ? <UsbScreen snapshot={state.snapshot} customThemes={state.settings?.usbDisplay.customThemes} themeId={state.settings?.usbDisplay.themeId ?? "usb-mint"} now={now} error={readError} /> : collapsed && state.snapshot ? <QuotaOrb locked={state.settings?.display.positionLocked ?? false} snapshot={state.snapshot} now={now} onExpand={() => setCollapsed(false)} /> : loading && !state.snapshot ? <div className="hud-empty" data-tauri-drag-region>正在读取配额…</div> : state.snapshot ?
           <HudContent snapshot={state.snapshot} theme={state.theme} now={now} onSettings={usbView ? undefined : openSettings} onRefresh={usbView ? undefined : () => { void perform("refresh-all", () => call("refresh.request", {})); }} onHide={usbView ? undefined : () => { void perform("hide", () => call("window.control", { action: "hide" })); }} onCollapse={usbView ? undefined : () => setCollapsed(true)} busy={busy} /> :
           <div className="hud-empty"><button className="text-button" onClick={() => { void reload(); }}>读取失败 · 点击重试</button></div>}
-        {!collapsed && (actionError ?? readError) && <div className="hud-error" role="alert">{actionError ?? readError}</div>}
+        {!usbView && !collapsed && (actionError ?? readError) && <div className="hud-error" role="alert">{actionError ?? readError}</div>}
       </div>}
     {!desktop && !settingsView && !usbView && <div className="browser-caption"><span>虚构数据预览 · 更多操作位于托盘右键菜单</span><button className="text-button" onClick={openSettings}>预览设置</button></div>}
   </main>);
@@ -365,7 +350,7 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
   const rescan = () => { void perform("rescan", () => internal("source_rescan", {}), "账号列表已重新读取。"); };
   const changeOrder = (id: string, direction: number) => setSelection(current => { const index = current.indexOf(id); const destination = index + direction; if (index < 0 || destination < 0 || destination >= current.length) return current; const next = [...current]; [next[index], next[destination]] = [next[destination], next[index]]; return next; });
   const selectionDirty = JSON.stringify(selection) !== JSON.stringify(state.accounts.filter(account => account.selected).sort((a, b) => a.order - b.order).map(account => account.id));
-  const nav = [{ id: "general", label: "常规", icon: <SlidersHorizontal size={17} /> }, { id: "display", label: "窗口与显示", icon: <Settings2 size={17} /> }, { id: "accounts", label: "账号", icon: <Database size={17} /> }, { id: "themes", label: "外观", icon: <Palette size={17} /> }, { id: "usb", label: "USB 屏幕", icon: <Layers3 size={17} /> }, { id: "about", label: "关于", icon: <Info size={17} /> }] as const;
+  const nav = [{ id: "general", label: "常规", icon: <SlidersHorizontal size={17} /> }, { id: "display", label: "窗口与显示", icon: <Settings2 size={17} /> }, { id: "accounts", label: "账号", icon: <Database size={17} /> }, { id: "themes", label: "外观", icon: <Palette size={17} /> }, { id: "usb", label: "独立监视屏", icon: <Layers3 size={17} /> }, { id: "about", label: "关于", icon: <Info size={17} /> }] as const;
 
   return localize(<div className="settings-shell" style={themeStyle(defaultTheme)}>
     {sourcesOpen && <SourceDialog error={error} sources={sources} setSources={setSources} busy={busy} onClose={() => setSourcesOpen(false)} onPick={pickSource} onSave={() => { void perform("sources-save", async () => { await internal("sources_save", { sources }); setSourcesOpen(false); }, "数据源已保存并扫描。"); }} />}
@@ -400,9 +385,12 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
         }}><option value="">-</option><option value="0">禁止</option><option value="60">1min</option><option value="300">5min</option><option value="900">15min</option><option value="3600">1h</option></select><AliasInput account={account} reload={reload} />{<div className={`order-actions ${selection.includes(account.id) ? "" : "order-placeholder"}`}><button className="icon-button" aria-label={`上移 ${account.displayName}`} disabled={busy !== null || selection.indexOf(account.id) === 0} onClick={() => changeOrder(account.id, -1)}><ArrowUp size={14} /></button><button className="icon-button" aria-label={`下移 ${account.displayName}`} disabled={busy !== null || selection.indexOf(account.id) === selection.length - 1} onClick={() => changeOrder(account.id, 1)}><ArrowDown size={14} /></button></div>}</div>) : <div className="empty-state"><Database size={24} /><strong>尚未发现账号</strong><span>选择含 auth.json 或 codex_accounts.json 的目录，再重新扫描。</span><button className="secondary-button" disabled={busy !== null} onClick={chooseSource}>选择数据目录</button></div>}</div>
         <div className="form-actions"><span>最多显示 {state.capabilities?.maxRefreshAccounts ?? 100} 个账号</span><button className="primary-button" disabled={busy !== null || !settings || !selectionDirty || selection.length > (state.capabilities?.maxRefreshAccounts ?? 100)} onClick={() => { if (settings) void perform("selection", () => call("accounts.selection.update", { expectedRevision: settings.settingsRevision, accountIds: selection }), "账号选择已保存。"); }}>{busy === "selection" ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}保存选择</button></div>
       </>}
-      {section === "themes" && <ThemeManager onChanged={reload} />}
-      {section === "usb" && settings && <UsbDisplayPanel settings={settings} busy={busy !== null} onChange={usbDisplay => patch("usb", { usbDisplay })} />}
-      {section === "about" && <><SectionHeading eyebrow="SMALL FOOTPRINT" title="专业的 AI IDE 订阅额度监视器" description="Tauri 2 + Rust · 开放接口 · 可自行扩展主题" /><SettingsCard title="AIDE monitor" description={state.capabilities?.appVersion ?? "—"} icon={<Layers3 size={18} />}><p className="about-description">AIDE monitor（AI IDE monitor），专业的订阅额度监视器。集中查看多个 AI IDE 账号的剩余额度、重置时间与最早恢复时间，支持独立代理、桌面悬浮窗与 USB 屏幕。</p><div className="about-status"><span className="status-dot" />{desktop ? "正在桌面应用中运行" : "浏览器演示，全部数据均为虚构"}</div></SettingsCard><UpdatePanel /><SettingsCard title="开放能力" description="以当前应用实际提供的方法为准" icon={<SlidersHorizontal size={17} />} action={<button className="text-button" onClick={() => { if (desktop) void perform("docs", () => internal("docs_open", {})); else window.open("/api.html", "_blank", "noopener,noreferrer"); }}>接口说明 <ChevronRight size={14} /></button>}><div className="capability-summary"><div><strong>{state.capabilities?.enabledMethods.length ?? 0}</strong><span>可用方法</span></div><div><strong>{state.capabilities?.apiVersion ?? "—"}</strong><span>接口版本</span></div><div><strong>{state.capabilities?.themeSchemaVersions.join(", ") ?? "—"}</strong><span>主题版本</span></div></div><div className="card-bottom"><span>第一版通过应用内部接口调用。</span><button className="text-button" disabled={busy !== null || !state.capabilities?.enabledMethods.includes("diagnostics.get")} onClick={() => { void perform("diagnostics", async () => { const response = await call("diagnostics.get", {}); setDiagnostics(response.data); }); }}>检查状态 <ChevronRight size={14} /></button></div>{diagnostics && <div className="diagnostics-summary"><div><span>适配器版本</span><span>{diagnostics.adapterVersion}</span></div><div><span>所选账号 / 进行中的刷新</span><span>{diagnostics.selectedAccountCount} / {diagnostics.activeJobCount}</span></div><div><span>最近错误</span><span>{diagnostics.recentErrorCodes.length ? diagnostics.recentErrorCodes.join("、") : "暂无"}</span></div></div>}</SettingsCard><button className="text-button" disabled={busy !== null} onClick={() => { void perform("position", () => call("window.control", { action: "restore_position" }), "窗口位置已恢复。"); }}>恢复悬浮窗位置</button></>}
+      {section === "themes" && <ThemeManager onChanged={reload} renderPreview={id => {
+        const theme = id === "midnight" ? midnightTheme : id === "paper" ? paperTheme : defaultTheme;
+        return state.snapshot ? <div className="desktop-theme-preview"><div className={`hud-shell theme-${id}`} style={themeStyle(theme)}><HudContent snapshot={state.snapshot} theme={theme} now={Date.now()} /></div><div style={themeStyle(theme)}><QuotaOrb locked snapshot={state.snapshot} now={Date.now()} onExpand={()=>{}} /></div></div> : <div className="usb-empty">{t("正在读取配额…")}</div>;
+      }} />}
+      {section === "usb" && settings && <UsbDisplayPanel settings={settings} snapshot={state.snapshot} busy={busy !== null} onChange={usbDisplay => patch("usb", { usbDisplay })} />}
+      {section === "about" && <><SectionHeading eyebrow="SMALL FOOTPRINT" title="专业的 AI IDE 订阅额度监视器" description="Tauri 2 + Rust · 开放接口 · 可自行扩展主题" /><SettingsCard title="AIDE monitor" description={state.capabilities?.appVersion ?? "—"} icon={<Layers3 size={18} />}><p className="about-description">AIDE monitor（AI IDE monitor），专业的订阅额度监视器。集中查看多个 AI IDE 账号的剩余额度、重置时间与最早恢复时间，支持独立代理、桌面悬浮窗与 独立监视屏。</p><div className="about-status"><span className="status-dot" />{desktop ? "正在桌面应用中运行" : "浏览器演示，全部数据均为虚构"}</div></SettingsCard><UpdatePanel /><SettingsCard title="开放能力" description="以当前应用实际提供的方法为准" icon={<SlidersHorizontal size={17} />} action={<button className="text-button" onClick={() => { if (desktop) void perform("docs", () => internal("docs_open", {})); else window.open("/api.html", "_blank", "noopener,noreferrer"); }}>接口说明 <ChevronRight size={14} /></button>}><div className="capability-summary"><div><strong>{state.capabilities?.enabledMethods.length ?? 0}</strong><span>可用方法</span></div><div><strong>{state.capabilities?.apiVersion ?? "—"}</strong><span>接口版本</span></div><div><strong>{state.capabilities?.themeSchemaVersions.join(", ") ?? "—"}</strong><span>主题版本</span></div></div><div className="card-bottom"><span>第一版通过应用内部接口调用。</span><button className="text-button" disabled={busy !== null || !state.capabilities?.enabledMethods.includes("diagnostics.get")} onClick={() => { void perform("diagnostics", async () => { const response = await call("diagnostics.get", {}); setDiagnostics(response.data); }); }}>检查状态 <ChevronRight size={14} /></button></div>{diagnostics && <div className="diagnostics-summary"><div><span>适配器版本</span><span>{diagnostics.adapterVersion}</span></div><div><span>所选账号 / 进行中的刷新</span><span>{diagnostics.selectedAccountCount} / {diagnostics.activeJobCount}</span></div><div><span>最近错误</span><span>{diagnostics.recentErrorCodes.length ? diagnostics.recentErrorCodes.join("、") : "暂无"}</span></div></div>}</SettingsCard><button className="text-button" disabled={busy !== null} onClick={() => { void perform("position", () => call("window.control", { action: "restore_position" }), "窗口位置已恢复。"); }}>恢复悬浮窗位置</button></>}
       </>}
       <div className="settings-content-footer"><ShieldCheck size={12} /><span>读取凭据与配额均由本机后台处理</span><button className="text-button" onClick={() => { void reload(); }} disabled={busy !== null}>同步状态</button></div>
     </section></div>

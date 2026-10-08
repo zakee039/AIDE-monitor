@@ -320,6 +320,9 @@ fn aide_theme_builtin(
     service: State<'_, Service>,
     request: Value,
 ) -> ApiResult<Value> {
+    if window.label() == "usb-display" {
+        return respond::<Value>(&service, Err(ApiError::new("FORBIDDEN", "独立监视屏使用独立主题")));
+    }
     respond(
         &service,
         authorize(&window, false)
@@ -328,11 +331,7 @@ fn aide_theme_builtin(
                 themes::get(
                     &service.theme_dir,
                     &r.id.unwrap_or_else(|| {
-                        if window.label() == "usb-display" {
-                            service.settings().usb_display.theme_id
-                        } else {
-                            service.settings().active_theme_id
-                        }
+                        service.settings().active_theme_id
                     }),
                 )
             }),

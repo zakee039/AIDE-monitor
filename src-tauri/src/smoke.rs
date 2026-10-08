@@ -306,7 +306,7 @@ const SCRIPT: &str = r#"
         refreshIntervalSeconds:61,
         autoRefresh:false,
         display:{privacyMode:true,alwaysOnTop:false,positionLocked:true},
-        usbDisplay:{enabled:false,deviceId:"smoke-disconnected-monitor",themeId:"midnight"}
+        usbDisplay:{enabled:false,deviceId:"smoke-disconnected-monitor",themeId:"usb-day"}
       });
       assert(updated.refreshIntervalSeconds === 61 && updated.display.privacyMode === true && updated.autoRefresh === false, 'SETTINGS_UPDATE_NOT_APPLIED');
       assert(updated.proxies.length === 1 && updated.proxies[0].address === 'socks5://127.0.0.1:7893', 'PROXY_PREFERENCES_NOT_APPLIED');

@@ -20,3 +20,9 @@ artifacts/theme-smoke.json
 artifacts/*.aidetheme
 artifacts/*-SHA256SUMS.txt
 artifacts/ui-update/
+artifacts/promo/
+
+# Local verification captures and installed-program backups
+artifacts/local-update-backups/
+artifacts/theme-studio/
+artifacts/usb-themes/

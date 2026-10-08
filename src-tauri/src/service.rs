@@ -544,6 +544,11 @@ impl Service {
         display.quota_provider =
             crate::quota_total::effective_provider(&display.quota_provider, &accounts).into();
         let total_quota = crate::quota_total::calculate(&accounts, &quotas, now, &display);
+        let provider_totals = crate::quota_total::PROVIDERS.into_iter().map(|provider| {
+            let mut options = display.clone();
+            options.quota_provider = provider.into();
+            (provider.into(), crate::quota_total::calculate(&accounts, &quotas, now, &options))
+        }).collect();
         Snapshot {
             source: d.source.clone(),
             accounts,
@@ -551,6 +556,7 @@ impl Service {
             availability,
             recommendation,
             total_quota,
+            provider_totals,
             next_refresh_at: d
                 .config
                 .selected_ids
@@ -794,10 +800,10 @@ impl Service {
             config.settings.account_refresh = overrides;
         }
         if let Some(usb) = patch.usb_display {
-            if crate::themes::builtin(&usb.theme_id).is_none()
+            if !crate::usb_display::valid_settings(&usb)
                 || (usb.enabled && usb.device_id.is_empty())
             {
-                return Err(ApiError::new("INVALID_ARGUMENT", "请选择屏幕和内置主题"));
+                return Err(ApiError::new("INVALID_ARGUMENT", "请选择屏幕和有效的独立监视屏主题"));
             }
             config.settings.usb_display = usb;
         }
@@ -2041,13 +2047,47 @@ mod tests {
     }
 
     #[test]
+    fn usb_quad_persists_and_totals_remain_scoped_to_each_provider() {
+        let (_dir, service, _id) = synthetic_service();
+        let patch: SettingsPatch = serde_json::from_value(serde_json::json!({
+            "expectedRevision": service.settings().settings_revision,
+            "usbDisplay": {"enabled":true,"deviceId":"test-monitor","themeId":"usb-quad"}
+        })).unwrap();
+        service.update_settings(patch).unwrap();
+        let loaded = crate::config::load(&service.config_path).unwrap();
+        assert_eq!(loaded.settings.usb_display.theme_id, "usb-quad");
+        let desktop_theme = service.settings().active_theme_id;
+        for id in ["default", "paper", "midnight", "quad"] {
+            let patch: SettingsPatch = serde_json::from_value(serde_json::json!({
+                "expectedRevision": service.settings().settings_revision,
+                "usbDisplay": {"enabled":true,"deviceId":"test-monitor","themeId":id}
+            })).unwrap();
+            assert!(service.update_settings(patch).is_err());
+            assert_eq!(service.settings().usb_display.theme_id, "usb-quad");
+            assert_eq!(service.settings().active_theme_id, desktop_theme);
+        }
+        let snapshot = service.snapshot();
+        assert_eq!(snapshot.provider_totals.len(), 4);
+        for id in crate::quota_total::PROVIDERS {
+            let total = &snapshot.provider_totals[id];
+            assert_eq!(total.provider_id, id);
+            let count = snapshot.accounts.iter().filter(|a| crate::quota_total::provider(&a.provider_id) == id).count();
+            assert_eq!(total.recommendation.as_ref().unwrap().coverage.selected, count);
+            if count == 0 {
+                assert_eq!(total.percent, None);
+                assert_eq!(total.recommendation.as_ref().unwrap().state, "empty");
+            }
+        }
+    }
+
+    #[test]
     fn display_and_account_preferences_persist_and_inherit() {
         let (_dir, service, id) = synthetic_service();
         let rev = service.settings().settings_revision;
         let patch: SettingsPatch = serde_json::from_value(serde_json::json!({
             "expectedRevision": rev, "accountRefresh": {id.clone(): 900},
             "display": {"positionLocked": true, "quotaProvider":"chatgpt", "quotaProfiles": {id.clone(): "pro10x"}},
-            "usbDisplay": {"enabled": true,"deviceId":"monitor-interface-A","themeId":"paper"}
+            "usbDisplay": {"enabled": true,"deviceId":"monitor-interface-A","themeId":"usb-day"}
         }))
         .unwrap();
         let saved = service.update_settings(patch).unwrap();

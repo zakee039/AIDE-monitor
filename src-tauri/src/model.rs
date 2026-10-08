@@ -213,6 +213,8 @@ pub struct Snapshot {
     pub availability: Vec<AccountAvailability>,
     pub recommendation: Recommendation,
     pub total_quota: TotalQuota,
+    #[serde(default)]
+    pub provider_totals: std::collections::HashMap<String, TotalQuota>,
     pub next_refresh_at: Option<String>,
 }
 
@@ -225,6 +227,7 @@ impl Default for Snapshot {
             availability: Vec::new(),
             recommendation: Recommendation::empty(),
             total_quota: TotalQuota::default(),
+            provider_totals: Default::default(),
             next_refresh_at: None,
         }
     }
@@ -427,13 +430,15 @@ pub struct UsbDisplaySettings {
     pub enabled: bool,
     pub device_id: String,
     pub theme_id: String,
+    pub custom_themes: Vec<UsbThemeDefinition>,
 }
 impl Default for UsbDisplaySettings {
     fn default() -> Self {
         Self {
             enabled: false,
             device_id: String::new(),
-            theme_id: "default".into(),
+            theme_id: "usb-mint".into(),
+            custom_themes: Vec::new(),
         }
     }
 }
@@ -446,4 +451,17 @@ impl Settings {
             None => None,
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UsbThemeDefinition {
+    pub kind: String,
+    pub version: u32,
+    pub width: u32,
+    pub height: u32,
+    pub id: String,
+    pub name: String,
+    pub layout: String,
+    pub palette: std::collections::HashMap<String, String>,
 }

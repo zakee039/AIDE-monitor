@@ -107,6 +107,7 @@ export interface Snapshot {
   recommendation: Recommendation;
   totalQuota?: { percent: number | null; partial: boolean; weeklyScalePercent: number; providerId?: string; recommendation?: Recommendation | null; estimated?: boolean }; // Local per-plan estimates, not provider guarantees.
   nextRefreshAt: UtcTime | null;
+  providerTotals?: Record<string, NonNullable<Snapshot["totalQuota"]>>;
 }
 
 export interface RefreshRequest { accountIds?: AccountId[] } // omitted = all selected
@@ -132,7 +133,12 @@ export interface DisplaySettings {
   privacyMode: boolean;
   locale: "system" | "zh-CN" | "en";
 }
-export interface UsbDisplaySettings { enabled: boolean; deviceId: string; themeId: string }
+export interface UsbThemeDefinition {
+  kind: "aide-usb-theme"; version: 1; width: 320; height: 170;
+  id: string; name: string; layout: "rows" | "columns";
+  palette: Record<"background" | "text" | "textMuted" | "border" | "success", string>;
+}
+export interface UsbDisplaySettings { enabled: boolean; deviceId: string; themeId: string; customThemes?: UsbThemeDefinition[] }
 export interface ProxyProfile { id: string; name: string; address: string }
 export interface Settings {
   proxies: ProxyProfile[];

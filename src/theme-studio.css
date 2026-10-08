@@ -1,0 +1,32 @@
+.theme-studio { margin: 20px 0; }
+.studio-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 17px; }
+.studio-toolbar button { height: 36px; padding: 0 16px; display: inline-flex; justify-content: center; align-items: center; gap: 7px; border-radius: 9px; font-size: 12px; font-weight: 600; }
+.studio-import { border: 1px solid #d9ded5; background: #fffdf8; color: #40534d; }
+.studio-import:hover:not(:disabled) { background: #edf5ee; border-color: #95b8a8; }
+.studio-apply { min-width: 86px; }
+.studio-apply:disabled { opacity: .75; }
+.studio-selector { display: flex; gap: 6px; padding: 5px; border: 1px solid #e1e3d9; border-radius: 12px; background: #eeeFE7; }
+.studio-selector > button { display: grid; place-items: center; width: 28px; flex-shrink: 0; padding: 0; border-radius: 7px; background: transparent; color: #67766d; }
+.studio-tabs { display: flex; flex: 1; gap: 5px; overflow-x: auto; scrollbar-width: none; }
+.studio-tabs > button { display: inline-flex; flex: 1 0 auto; justify-content: center; align-items: center; gap: 7px; padding: 9px 15px; border-radius: 8px; color: #657269; background: transparent; font-size: 12px; max-width: 220px; }
+.studio-tabs > button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.studio-tabs > button[aria-selected="true"] { color: #285e51; background: #fffefa; box-shadow: 0 2px 5px #35473810; font-weight: 650; }
+.studio-tabs i { width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: #599b80; }
+.studio-preview { margin-top: 16px; border: 1px solid #e0e3d9; border-radius: 16px; overflow: hidden; background: #f0f2ec; }
+.studio-preview-heading { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px 0; font-size: 12px; color: #475b50; }
+.studio-preview-heading > span { color: #819086; font-size: 10px; }
+.studio-canvas { width: 100%; min-height: 218px; display: flex; justify-content: center; align-items: center; padding: 28px 0; overflow: hidden; }
+.studio-fit { position: relative; flex-shrink: 0; }
+.studio-fit-content { width: max-content; position: absolute; left: 0; top: 0; transform-origin: top left; }
+.studio-fit-content > .usb-screen { border-radius: 10px; box-shadow: 0 10px 26px #384b3914; }
+.studio-preview-caption { padding: 0 18px 16px; text-align: center; font-size: 10px; color: #7b887e; }
+.desktop-theme-preview { display: flex; flex-direction: row; align-items: center; gap: 28px; }
+.desktop-theme-preview .hud-shell { border: 1px solid color-mix(in srgb, var(--border) 25%, transparent); border-radius: 10px; box-shadow: 0 10px 26px #384b3914; max-width: none; pointer-events: none; }
+.desktop-theme-preview .quota-orb { pointer-events: none; width: 43px; height: 43px; }
+.studio-widget-placeholder { max-width: 330px; text-align: center; color: #718077; padding: 40px 20px; font-size: 12px; }
+.studio-widget-placeholder strong { display: block; margin-bottom: 12px; color: #40564a; }
+.studio-theme-management { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; font-size: 11px; }
+.usb-panel > h1, .theme-manager > h1 { margin: 0 0 8px; font-size: 24px; letter-spacing: -.7px; }
+.usb-panel > p, .theme-manager > p { color: #788278; font-size: 12px; line-height: 1.6; }
+.usb-device-card { margin: 18px 0 22px; }
+.usb-device-card .setting-row { padding: 12px 16px; }

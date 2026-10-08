@@ -8,7 +8,7 @@ let sequence = 0;
 const listeners = new Set<(event: HudEvent) => void>();
 const source: SourceStatus = { state: "ready", format: "plaintext", adapterVersion: "演示", error: null };
 const themes = new Map<string, ThemeDocument>([defaultTheme, midnightTheme, paperTheme].map(theme => [theme.id, theme]));
-let settings: Settings = { settingsRevision: 1, proxies: [], accountProxies: {}, accountRefresh: {}, usbDisplay: { enabled: false, deviceId: "", themeId: "default" }, refreshIntervalSeconds: 300, autoRefresh: true, display: { positionLocked: false, alwaysOnTop: true, showHoverDetails: false, privacyMode: false, locale: "en" }, activeThemeId: "default" };
+let settings: Settings = { settingsRevision: 1, proxies: [], accountProxies: {}, accountRefresh: {}, usbDisplay: { enabled: false, deviceId: "", themeId: new URLSearchParams(location.search).get("usbTheme") ?? "usb-mint" }, refreshIntervalSeconds: 300, autoRefresh: true, display: { positionLocked: false, alwaysOnTop: true, showHoverDetails: false, privacyMode: false, locale: "en" }, activeThemeId: "default" };
 let accounts: AccountSummary[] = [
   { id: "demo-atlas", displayName: "atlas", providerId: "codex", selected: true, order: 0, support: "supported" },
   { id: "demo-studio", displayName: "studio", providerId: "codex", selected: true, order: 1, support: "supported" },
@@ -122,6 +122,7 @@ export function demoSnapshot(): Snapshot {
   const available = selected.find(account => availability.find(item => item.accountId === account.id)?.state === "now");
   const waiting = availability.filter(item => item.state === "waiting").sort((a, b) => Date.parse(a.estimatedAvailableAt!) - Date.parse(b.estimatedAvailableAt!))[0];
   const providerId = selectedQuotaProvider(settings, accounts) || "chatgpt";
+  const totalFor = (providerId: string): NonNullable<Snapshot["totalQuota"]> => {
   const own = selected.filter(a => quotaProvider(a.providerId) === providerId);
   const ownQuotas = quotas.filter(q => own.some(a => a.id === q.accountId));
   const baseRatio = providerId === "antigravity" ? 0.25 : 0.15;
@@ -140,12 +141,16 @@ export function demoSnapshot(): Snapshot {
   const ownAvailable = own.find(a => availability.some(v => v.accountId === a.id && v.state === "now"));
   const ownWaiting = availability.filter(v => own.some(a => a.id === v.accountId) && v.state === "waiting").sort((a,b) => Date.parse(a.estimatedAvailableAt!) - Date.parse(b.estimatedAvailableAt!))[0];
   const ownRecommendation: Snapshot["recommendation"] = { state: ownAvailable ? "now" : ownWaiting ? "waiting" : own.length ? "unknown" : "empty", accountId: ownAvailable?.id ?? ownWaiting?.accountId ?? null, estimatedAvailableAt: ownAvailable ? null : ownWaiting?.estimatedAvailableAt ?? null, reason: "provider_quota", coverage: { selected: own.length, known: contributions.length, unknown: own.length - contributions.length, complete: own.length === contributions.length } };
+    return { percent: contributions.length ? contributions.reduce((a, b) => a + b, 0) : null, partial: scenario === "orb-partial" || contributions.length < own.length, weeklyScalePercent: baseRatio * 100, providerId, recommendation: ownRecommendation, estimated: true };
+  };
+  const totalQuota = totalFor(providerId);
   return {
     source,
     accounts: selected, quotas,
     availability,
-    recommendation: { state: available ? "now" : waiting ? "waiting" : selected.length ? "unknown" : "empty", accountId: available?.id ?? waiting?.accountId ?? null, estimatedAvailableAt: available ? null : waiting?.estimatedAvailableAt ?? null, reason: available ? "available" : waiting ? "earliest_available" : "no_data", coverage: { selected: selected.length, known: contributions.length, unknown: selected.length - contributions.length, complete: contributions.length === selected.length } },
-    totalQuota: { percent: contributions.length ? contributions.reduce((a, b) => a + b, 0) : null, partial: scenario === "orb-partial" || contributions.length < own.length, weeklyScalePercent: baseRatio * 100, providerId, recommendation: ownRecommendation, estimated: true },
+    recommendation: { state: available ? "now" : waiting ? "waiting" : selected.length ? "unknown" : "empty", accountId: available?.id ?? waiting?.accountId ?? null, estimatedAvailableAt: available ? null : waiting?.estimatedAvailableAt ?? null, reason: available ? "available" : waiting ? "earliest_available" : "no_data", coverage: { selected: selected.length, known: availability.filter(a => a.state !== "unknown").length, unknown: availability.filter(a => a.state === "unknown").length, complete: availability.every(a => a.state !== "unknown") } },
+    totalQuota,
+    providerTotals: Object.fromEntries(["chatgpt", "claude", "antigravity", "grok"].map(id => [id, totalFor(id)])),
     nextRefreshAt: settings.autoRefresh ? new Date(Date.now() + settings.refreshIntervalSeconds * 1000).toISOString() : null,
   };
 }
