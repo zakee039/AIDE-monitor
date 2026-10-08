@@ -124,7 +124,29 @@ pub fn calculate(
         .filter_map(|a| quotas.iter().find(|q| q.account_id == a.id))
         .map(|q| scoped_quota(q, platform))
         .collect();
-    let availability: Vec<_> = quotas.iter().map(|q| domain::evaluate(q, now)).collect();
+    let availability: Vec<_> = quotas
+        .iter()
+        .map(|q| {
+            // Totals may display the last successful sample after a failed refresh.
+            // Keep the authoritative quota/error intact so account eligibility still reports failure.
+            if q.error.is_some() && q.origin == "network" {
+                if let Some(success) = q
+                    .last_success_at
+                    .as_deref()
+                    .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+                    .map(|value| value.with_timezone(&Utc))
+                    .filter(|success| *success <= now)
+                {
+                    let mut previous = q.clone();
+                    previous.error = None;
+                    previous.status = "ok".into();
+                    previous.freshness = "fresh".into();
+                    return domain::evaluate(&previous, success);
+                }
+            }
+            domain::evaluate(q, now)
+        })
+        .collect();
     let recommendation = domain::recommend(&accounts, &availability, &quotas);
     // Decide units before threshold exclusion. A temporarily depleted 5h account must
     // not switch the total from 5h units to weekly units.
@@ -192,6 +214,51 @@ pub fn calculate(
 mod tests {
     use super::*;
     use chrono::Duration;
+    #[test]
+    fn failed_refresh_retains_totals_without_changing_account_eligibility() {
+        let now = Utc::now();
+        let accounts = [account("a", "codex"), account("b", "codex_usage")];
+        let display = DisplaySettings::default();
+        let mut failed = quota("a", Some(80.), 6., now);
+        failed.error = Some(ApiError::new("NETWORK_ERROR", "test"));
+        failed.status = "error".into();
+        failed.freshness = "stale".into();
+        let later = now + Duration::hours(6);
+        let total = calculate(
+            &accounts,
+            &[failed.clone(), quota("b", Some(50.), 20., later)],
+            later,
+            &display,
+        );
+        assert_eq!(total.percent, Some(90.));
+        assert!(!total.partial);
+        assert_eq!(domain::evaluate(&failed, later).reason, "query_failed");
+        failed.last_success_at = None;
+        assert_eq!(
+            calculate(&accounts[..1], &[failed], later, &display).percent,
+            None
+        );
+    }
+
+    #[test]
+    fn failed_refresh_retains_waiting_countdown_and_recovers_on_success() {
+        let now = Utc::now();
+        let accounts = [account("a", "codex")];
+        let display = DisplaySettings::default();
+        let mut failed = quota("a", Some(0.), 50., now);
+        let previous = calculate(&accounts, &[failed.clone()], now, &display);
+        failed.error = Some(ApiError::new("TIMEOUT", "test"));
+        let total = calculate(&accounts, &[failed], now + Duration::minutes(10), &display);
+        assert_eq!(total.percent, previous.percent);
+        assert_eq!(
+            total.recommendation.unwrap().estimated_available_at,
+            previous.recommendation.unwrap().estimated_available_at
+        );
+        assert_eq!(
+            calculate(&accounts, &[quota("a", Some(65.), 50., now)], now, &display).percent,
+            Some(65.)
+        );
+    }
     fn account(id: &str, p: &str) -> AccountSummary {
         AccountSummary {
             id: id.into(),

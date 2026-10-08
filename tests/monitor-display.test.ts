@@ -1,11 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { nextProviderReset, resetText } from '../src/monitor-display.ts';
+import { displayableQuota, nextProviderReset, resetText } from '../src/monitor-display.ts';
 import type { Snapshot, AccountQuota } from '../contracts/hud-api.ts';
 const now = Date.parse('2026-10-08T08:00:00Z');
 const at = (minutes:number) => new Date(now + minutes*60000).toISOString();
 const quota = (id:string, minutes:number, scope='base'):AccountQuota => ({ accountId:id,origin:'network',freshness:'fresh',status:'ok',lastSuccessAt:at(-1),lastAttemptAt:at(-1),observedAt:at(-1),validUntil:at(60),providerAllowed:true,baseCoverageComplete:true,blockingReason:'none',error:null,windows:[{id:'limit',scope:scope as 'base',kind:'primary',label:'5h',durationSeconds:18000,applicability:'required',measurement:'percent',remainingPercent:50,exhausted:false,resetsAt:at(minutes)}] });
 const snapshot = (quotas:AccountQuota[]):Snapshot => ({accounts:[{id:'a',providerId:'codex',displayName:'a',selected:true,order:0,support:'supported'},{id:'b',providerId:'codex_usage',displayName:'b',selected:true,order:1,support:'supported'},{id:'c',providerId:'antigravity',displayName:'c',selected:true,order:2,support:'supported'}],quotas,nextRefreshAt:at(1)} as Snapshot);
+
+test('failed refresh preserves previous measurements and reset countdown, including stale samples',()=>{
+ const previous=quota('a',90);
+ previous.status='error';previous.error={code:'NETWORK_ERROR',message:'failed',retryable:true};
+ previous.freshness='stale';previous.validUntil=at(-1);
+ assert.equal(displayableQuota(previous,now),true);
+ assert.equal(nextProviderReset(snapshot([previous]),'chatgpt',now),at(90));
+ assert.equal(previous.windows[0].remainingPercent,50);
+ previous.lastSuccessAt=null;
+ assert.equal(displayableQuota(previous,now),false);
+ assert.equal(nextProviderReset(snapshot([previous]),'chatgpt',now),null);
+ assert.equal(displayableQuota(undefined,now),false);
+});
 test('next reset uses selected platform quota windows, not polling or another provider',()=>{
  const data=snapshot([quota('a',200),quota('b',90),quota('c',2,'feature:gemini'),quota('unselected',1)]);
  assert.equal(nextProviderReset(data,'chatgpt',now),at(90));

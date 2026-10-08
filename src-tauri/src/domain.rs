@@ -217,7 +217,7 @@ fn weekly_reset(quota: Option<&AccountQuota>) -> Option<DateTime<Utc>> {
 }
 
 /// User-requested estimate, not an official conversion or recommendation floor.
-/// Tiny positive balances still count; stale/failed/unconfirmed balances do not.
+/// Failed refreshes retain the last successful balance for display.
 #[cfg(test)]
 pub fn total_quota(
     accounts: &[AccountSummary],
@@ -487,11 +487,10 @@ mod tests {
         );
         assert_eq!(total.percent, Some(52.0));
         assert!(!total.partial);
-        for invalid in ["stale", "error", "cache", "reset", "missing"] {
+        for invalid in ["stale", "cache", "reset", "missing"] {
             let mut q = balance("b", 100.0, 100.0);
             match invalid {
                 "stale" => q.freshness = "stale".into(),
-                "error" => q.error = Some(ApiError::new("NETWORK_ERROR", "test")),
                 "cache" => q.origin = "cockpit_cache".into(),
                 "reset" => q.windows[0].resets_at = Some(at(0)),
                 "missing" => q.base_coverage_complete = false,

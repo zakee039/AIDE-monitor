@@ -122,6 +122,12 @@ export default function App() {
   const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [errorVisible, setErrorVisible] = useState(false);
+  useEffect(() => {
+    setErrorVisible(!!(actionError ?? readError));
+    const timer = window.setTimeout(() => setErrorVisible(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [actionError, readError]);
   const [notice, setNotice] = useState<string | null>(null);
   const [collapsed, commitCollapsed] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
@@ -224,7 +230,7 @@ export default function App() {
         {usbView ? <UsbScreen snapshot={state.snapshot} customThemes={state.settings?.usbDisplay.customThemes} themeId={state.settings?.usbDisplay.themeId ?? "usb-mint"} now={now} error={readError} /> : collapsed && state.snapshot ? <QuotaOrb locked={state.settings?.display.positionLocked ?? false} snapshot={state.snapshot} now={now} onExpand={() => setCollapsed(false)} /> : loading && !state.snapshot ? <div className="hud-empty" data-tauri-drag-region>正在读取配额…</div> : state.snapshot ?
           <HudContent snapshot={state.snapshot} theme={state.theme} now={now} onSettings={usbView ? undefined : openSettings} onRefresh={usbView ? undefined : () => { void perform("refresh-all", () => call("refresh.request", {})); }} onHide={usbView ? undefined : () => { void perform("hide", () => call("window.control", { action: "hide" })); }} onCollapse={usbView ? undefined : () => setCollapsed(true)} busy={busy} /> :
           <div className="hud-empty"><button className="text-button" onClick={() => { void reload(); }}>读取失败 · 点击重试</button></div>}
-        {!usbView && !collapsed && (actionError ?? readError) && <div className="hud-error" role="alert">{actionError ?? readError}</div>}
+        {!usbView && !collapsed && errorVisible && (actionError ?? readError) && <div className="hud-error" role="alert">{actionError ?? readError}</div>}
       </div>}
     {!desktop && !settingsView && !usbView && <div className="browser-caption"><span>虚构数据预览 · 更多操作位于托盘右键菜单</span><button className="text-button" onClick={openSettings}>预览设置</button></div>}
   </main>);

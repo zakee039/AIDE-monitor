@@ -1,5 +1,5 @@
 import { lightQuotaColors, quotaBandForPercent } from "./quota-colors";
-import { displayProvider, displayWindows, freshQuota, nextProviderReset, resetText } from "./monitor-display";
+import { displayProvider, displayWindows, displayableQuota, nextProviderReset, resetText } from "./monitor-display";
 import { orbDisplay } from "./orb";
 import { useState, useEffect, useRef, type CSSProperties } from "react";
 import type { Snapshot, UsbThemeDefinition } from "../contracts/hud-api";
@@ -42,13 +42,14 @@ export function UsbScreen({ snapshot, themeId, now, error, customThemes = [] }: 
     {columns ? <div className="usb-columns">{providers.map(([id, name]) => {
       const total = snapshot?.providerTotals?.[id] ?? (snapshot?.totalQuota?.providerId === id ? snapshot.totalQuota : undefined);
       const display = orbDisplay({ totalQuota: total, recommendation: total?.recommendation ?? { state: "unknown", accountId: null, estimatedAvailableAt: null, reason: "no_data", coverage: { selected: 0, known: 0, unknown: 0, complete: false } } }, now);
-      const amount = error ? "—" : display.text;
-      const timeLines = error ? null : display.timeLines;
-      const nextReset = error ? null : nextProviderReset(snapshot, id, now);
+      const amount = display.text;
+      const timeLines = display.timeLines;
+      const nextReset = nextProviderReset(snapshot, id, now);
+      const failed = !!error || snapshot?.accounts.some(account => displayProvider(account.providerId) === id && snapshot.quotas.some(q => q.accountId === account.id && q.error));
       const accountCount = snapshot?.accounts.filter(account => displayProvider(account.providerId) === id).length;
       return <section className="usb-platform" key={id}>
         <Icon provider={id} /><span className="usb-platform-name">{name}</span>
-        <div className="usb-value">{timeLines ? <strong className="usb-countdown">{timeLines.map(line => <span key={line}>{line}</span>)}</strong> : <strong className={`usb-total ${amount.endsWith("%") ? quotaBandForPercent(total?.percent) : ""}`} style={{ fontSize: `${Math.min(28, 112 / amount.length)}px` }}>{amount}</strong>}</div>
+        <div className="usb-value">{failed && <span className="usb-refresh-warning" aria-label={t("查询失败")}>!</span>}{timeLines ? <strong className="usb-countdown">{timeLines.map(line => <span key={line}>{line}</span>)}</strong> : <strong className={`usb-total ${amount.endsWith("%") ? quotaBandForPercent(total?.percent) : ""}`} style={{ fontSize: `${Math.min(28, 112 / amount.length)}px` }}>{amount}</strong>}</div>
         <footer><strong aria-label={t("下次额度重置")}>{resetText(nextReset, now)}</strong><strong className="usb-account-count" aria-label={t("账号数量")}>{accountCount ?? "—"}</strong></footer>
       </section>;
     })}</div> : snapshot?.accounts.length ? <div className="usb-account-viewport"><div className="usb-account-track" style={{ transform: `translateX(-${page * 100}%)` }}>
@@ -58,9 +59,10 @@ export function UsbScreen({ snapshot, themeId, now, error, customThemes = [] }: 
         const limits = displayWindows(quota, account.providerId);
         const limitPages = Math.max(1, Math.ceil(limits.length / 2));
         const limitPage = Math.floor(elapsed / (8000 * pages)) % limitPages;
-        const known = !error && freshQuota(quota, now);
+        const known = displayableQuota(quota, now);
+        const failed = !!error || !!quota?.error;
         return <section className={`usb-platform usb-account-card ${known ? "" : "usb-uncertain"}`} key={account.id}>
-          <div className="usb-account-identity"><Icon provider={account.providerId}/><strong className="usb-account-name" title={account.displayName}>{account.displayName}</strong></div>
+          <div className="usb-account-identity"><Icon provider={account.providerId}/><strong className="usb-account-name" title={account.displayName}>{failed && <span className="usb-refresh-warning" aria-label={t("查询失败")}>! </span>}{account.displayName}</strong></div>
           <div className="usb-account-values">{limits.length ? limits.slice(limitPage * 2, limitPage * 2 + 2).map(limit => <div className="usb-account-limit" key={limit.id}>
             <div title={limit.label}><strong className={known && limit.measurement === "percent" ? quotaBandForPercent(limit.remainingPercent) : ""}>{!known || limit.measurement === "unknown" ? "—" : limit.measurement === "unlimited" ? "∞" : percent(limit.remainingPercent)}</strong></div>
             <span aria-label={t("下次额度重置")}>{known ? resetText(limit.resetsAt, now) : "—"}</span>
