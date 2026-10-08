@@ -1,3 +1,4 @@
+import { quotaBandForPercent } from "./quota-colors";
 import { UsbScreen } from "./UsbScreen";
 import { QuotaSettings } from "./QuotaSettings";
 import { ProxySettings } from "./ProxySettings";
@@ -291,7 +292,7 @@ function AccountRow({ account, quota, availability, now, showCredits, windowColu
 function quotaBand(window?: QuotaWindow): string {
   if (window?.measurement !== "percent" || window.remainingPercent === null) return "";
   const percent = window.remainingPercent;
-  return percent < 20 ? "quota-red" : percent < 50 ? "quota-orange" : percent < 80 ? "quota-blue" : "quota-green";
+  return quotaBandForPercent(percent);
 }
 
 function RecommendationStrip({ snapshot, now, onSettings, onRefresh, onHide, onCollapse, busy }: { snapshot: Snapshot; now: number; onSettings?: () => void; onRefresh?: () => void; onHide?: () => void; onCollapse?: () => void; busy?: string | null }) {

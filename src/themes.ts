@@ -1,3 +1,4 @@
+import { lightQuotaColors, darkQuotaColors } from "./quota-colors";
 import type { CSSProperties } from "react";
 import cream from "../examples/themes/cream/theme.json";
 import midnight from "../examples/themes/midnight/theme.json";
@@ -41,7 +42,7 @@ export function themeStyle(theme: ThemeDocument): CSSProperties {
   const background = theme.tokens.colors.background;
   const rgb = [1, 3, 5].map(offset => parseInt(background.slice(offset, offset + 2), 16));
   const dark = rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722 < 128;
-  const quotaColors = dark ? ["#FF8585", "#FFBD70", "#80BCFF", "#77D7A0"] : ["#BA3038", "#A75B12", "#286FAD", "#28784E"];
+  const quotaColors = dark ? darkQuotaColors : lightQuotaColors;
   ["red", "orange", "blue", "green"].forEach((color, index) => { styles[`--quota-${color}`] = quotaColors[index]; });
   const { typography, spacing, radius } = theme.tokens;
   styles["--theme-font-size"] = `${Math.max(12, Math.min(20, typography.fontSize))}px`;
