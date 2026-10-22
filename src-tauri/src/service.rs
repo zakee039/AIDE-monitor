@@ -1216,6 +1216,15 @@ impl Service {
                 }
                 d.samples.insert(id.clone(), Instant::now());
                 d.clock_pending.remove(&id);
+                if quota.windows.iter().all(|w| w.scope != "feature:gemini4") {
+                    if let Some(prev_q) = d.quotas.get(&id) {
+                        if let Some(prev_w) = prev_q.windows.iter().find(|w| w.scope == "feature:gemini4") {
+                            if prev_w.resets_at.as_deref().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_some_and(|t| t > now) {
+                                quota.windows.push(prev_w.clone());
+                            }
+                        }
+                    }
+                }
                 d.quotas.insert(id.clone(), quota);
                 if let Some(a) = d.accounts.iter_mut().find(|a| a.summary.id == id) {
                     a.summary.support = "supported".into()

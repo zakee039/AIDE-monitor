@@ -240,7 +240,11 @@ select { min-height: 32px; font-size: 11px; border: 1px solid var(--border); bor
 .capability-summary span { font-size: 10px; color: var(--text-muted); }
 .diagnostics-summary { padding: 12px 17px; font-size: 10px; color: var(--text-muted); }
 .diagnostics-summary > div { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
-.spin { animation: spin 1s linear infinite; }
+.spin {
+  animation: spin 1s linear infinite;
+  will-change: transform;
+  transform: translateZ(0);
+}
 @keyframes spin { to { transform: rotate(360deg); } }
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--border, #8495aa) 40%, transparent); border-radius: 4px; }

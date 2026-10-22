@@ -81,9 +81,17 @@ function useHudState() {
         ]);
         if (!mounted.current) break;
         const newestEvent = observed.current;
-        if (newestEvent.instanceId && snapshot.instanceId === newestEvent.instanceId && snapshot.revision < newestEvent.revision) { dirty.current = true; continue; }
+        if (newestEvent.instanceId && snapshot.instanceId === newestEvent.instanceId && snapshot.revision < newestEvent.revision) {
+          await new Promise(r => setTimeout(r, 60));
+          dirty.current = true;
+          continue;
+        }
         if (snapshot.instanceId === current.current.instanceId && snapshot.revision < current.current.revision) continue;
-        if (newestEvent.instanceId && snapshot.instanceId !== newestEvent.instanceId) { dirty.current = true; continue; }
+        if (newestEvent.instanceId && snapshot.instanceId !== newestEvent.instanceId) {
+          await new Promise(r => setTimeout(r, 60));
+          dirty.current = true;
+          continue;
+        }
         current.current = { instanceId: snapshot.instanceId, revision: snapshot.revision };
         setState({ snapshot: snapshot.data, accounts: accounts.data, settings: settings.data, themes: themes.data, capabilities: capabilities.data, sourcePath: sourcePath.path, theme });
         setError(null);
@@ -99,11 +107,15 @@ function useHudState() {
   useEffect(() => {
     mounted.current = true;
     let stop: (() => void) | undefined;
+    let debounceTimer: number | null = null;
     void hud.subscribe(event => {
       if (!mounted.current) return;
       if (observed.current.instanceId === event.instanceId && event.revision < observed.current.revision) return;
       observed.current = { instanceId: event.instanceId, revision: event.revision };
-      void reload();
+      if (debounceTimer) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        void reload();
+      }, 50);
     }).then(unsubscribe => {
       if (!mounted.current) { unsubscribe(); return; }
       stop = unsubscribe;
@@ -228,7 +240,7 @@ export default function App() {
   }} className={`app-stage ${desktop ? "desktop" : "browser"} ${settingsView ? "settings-stage" : "hud-stage"} ${usbView ? "usb-stage" : ""} ${state.settings?.display.positionLocked || usbView ? "position-locked" : ""}`}>
     {settingsView ?
       <SettingsView state={state} loading={loading} error={actionError ?? readError} notice={notice} busy={busy} perform={perform} reload={reload} onBack={() => { setSettingsView(false); history.replaceState(null, "", location.pathname); }} /> :
-      <div ref={panelRef} className={`hud-shell ${collapsed ? "is-collapsed" : ""} ${transitioning ? "is-transitioning" : ""} ${usbView ? "" : `theme-${state.theme.id}`}`} style={usbView ? undefined : themeStyle(state.theme)}>
+      <div ref={panelRef} data-tauri-drag-region className={`hud-shell ${collapsed ? "is-collapsed" : ""} ${transitioning ? "is-transitioning" : ""} ${usbView ? "" : `theme-${state.theme.id}`}`} style={usbView ? undefined : themeStyle(state.theme)}>
         {usbView ? <UsbScreen snapshot={state.snapshot} customThemes={state.settings?.usbDisplay.customThemes} themeId={state.settings?.usbDisplay.themeId ?? "usb-mint"} now={now} error={readError} /> : collapsed && state.snapshot ? <QuotaOrb locked={state.settings?.display.positionLocked ?? false} snapshot={state.snapshot} now={now} onExpand={() => setCollapsed(false)} /> : loading && !state.snapshot ? <div className="hud-empty" data-tauri-drag-region>正在读取配额…</div> : state.snapshot ?
           <HudContent snapshot={state.snapshot} theme={state.theme} now={now} onSettings={usbView ? undefined : openSettings} onRefresh={usbView ? undefined : () => { void perform("refresh-all", () => call("refresh.request", {})); }} onHide={usbView ? undefined : () => { void perform("hide", () => call("window.control", { action: "hide" })); }} onCollapse={usbView ? undefined : () => setCollapsed(true)} busy={busy} /> :
           <div className="hud-empty"><button className="text-button" onClick={() => { void reload(); }}>读取失败 · 点击重试</button></div>}
@@ -308,9 +320,9 @@ function RecommendationStrip({ snapshot, now, onSettings, onRefresh, onHide, onC
   return localize(<div className={`compact-recommendation state-${recommendation.state}`} data-tauri-drag-region>
     <span className="availability-copy" data-tauri-drag-region><span>available:</span><strong translate="no" data-tauri-drag-region>{account?.displayName ?? "—"}</strong><span>·</span><span className="usable-time">{recommendation.state === "now" ? "now" : recommendation.state === "waiting" ? durationText(recommendation.estimatedAvailableAt, now) : "—"}</span></span>
     <div className="hud-actions">
-      <button className="row-refresh" aria-label="设置" disabled={!onSettings || !!busy} onClick={onSettings}><Settings2 size={13} /></button>
+      <button className="row-refresh" aria-label="设置" disabled={!onSettings || (!!busy && busy !== "refresh-all")} onClick={onSettings}><Settings2 size={13} /></button>
       <button className="row-refresh" aria-label="刷新全部" disabled={!onRefresh || !!busy || refreshing || !snapshot.accounts.length} onClick={onRefresh}><RefreshCw size={13} className={refreshing ? "spin" : ""} /></button>
-      <button className="row-refresh" aria-label="隐藏悬浮窗" disabled={!onHide || !!busy} onClick={onHide}><EyeOff size={13} /></button>
+      <button className="row-refresh" aria-label="隐藏悬浮窗" disabled={!onHide || (!!busy && busy !== "refresh-all")} onClick={onHide}><EyeOff size={13} /></button>
       {onCollapse && <button className="row-refresh hud-collapse" aria-label="折叠悬浮窗" onClick={onCollapse}><ChevronRight size={14} /></button>}
     </div>
   </div>);

@@ -17,6 +17,11 @@ pub async fn fetch_quota(
     credentials: &Credentials,
     hud_account_id: &str,
 ) -> Result<AccountQuota, ApiError> {
+    if credentials.provider == "antigravity" {
+        if let Ok(quota) = super::antigravity_local::fetch_quota(hud_account_id).await {
+            return Ok(quota);
+        }
+    }
     let response = (if credentials.provider == "codex_usage" {
         quota_request(client, credentials)
     } else {

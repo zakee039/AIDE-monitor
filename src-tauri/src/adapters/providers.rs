@@ -43,7 +43,7 @@ pub fn request(client: &Client, c: &Credentials) -> Result<RequestBuilder, ApiEr
         .header(
             "User-Agent",
             match c.provider.as_str() {
-                "antigravity" => "antigravity/1.20.5 windows/amd64",
+                "antigravity" => "antigravity/2.25.0 windows/amd64",
                 "grok" => "grok-cli/1.0.52",
                 _ => concat!("AIDE-monitor/", env!("CARGO_PKG_VERSION")),
             },
@@ -167,6 +167,7 @@ pub fn parse(
         "antigravity" => {
             let groups = v
                 .get("groups")
+                .or_else(|| v.get("response").and_then(|r| r.get("groups")))
                 .and_then(Value::as_array)
                 .ok_or_else(|| ApiError::new("RESPONSE_UNSUPPORTED", "未返回额度汇总"))?;
             let buckets: Vec<&Value> = groups
@@ -175,12 +176,12 @@ pub fn parse(
                 .flatten()
                 .collect();
             for (family, label, aliases) in [
-                ("gemini", "Gemini", ["gemini", "gemini"]),
-                ("claude", "Claude", ["3p", "claude"]),
+                ("gemini", "Gemini", &["gemini"][..]),
+                ("claude", "Claude", &["3p", "claude"][..]),
                 (
                     "gemini4",
                     "Gemini 4",
-                    ["gemini-argon-wtu", "gemini-argon-wtu"],
+                    &["gemini-argon-wtu", "gemini-argon", "gemini-4-argon", "gemini-4"][..],
                 ),
             ] {
                 for (period, duration) in [("5h", 18000), ("weekly", 604800)] {
@@ -194,6 +195,7 @@ pub fn parse(
                                 aliases.iter().any(|prefix| {
                                     id == format!("{prefix}-{period}")
                                         || id == format!("{prefix}:{period}")
+                                        || (period == "weekly" && id == *prefix)
                                 })
                             })
                         })
@@ -206,7 +208,7 @@ pub fn parse(
                         .map(|b| {
                             percent(
                                 b.get("remainingFraction")
-                                    .and_then(Value::as_f64)
+                                    .and_then(number)
                                     .map(|f| f * 100.0),
                             )
                         })
@@ -226,10 +228,10 @@ pub fn parse(
                         reset,
                         Some(duration),
                     );
-                    w.kind = if period == "weekly" {
-                        "secondary"
-                    } else {
+                    w.kind = if family == "gemini4" || period != "weekly" {
                         "primary"
+                    } else {
+                        "secondary"
                     }
                     .into();
                     windows.push(w);
@@ -482,7 +484,77 @@ mod tests {
             .unwrap();
             assert_eq!(r.url().scheme(), "https");
             assert!(r.headers()[AUTHORIZATION].is_sensitive());
+            if p == "antigravity" {
+                assert_eq!(
+                    r.headers()["user-agent"],
+                    "antigravity/2.25.0 windows/amd64"
+                );
+            }
             assert!(!format!("{r:?}").contains("secret-synthetic"));
         }
+    }
+    #[test]
+    fn antigravity_parses_gemini4_argon_variants() {
+        let q = parse(
+            &json!({"groups":[
+                {"displayName":"Gemini Models","buckets":[
+                    {"bucketId":"gemini-weekly","remainingFraction":0.94,"resetTime":"2026-10-24T06:33:44Z"},
+                    {"bucketId":"gemini-5h","remainingFraction":0.95,"resetTime":"2026-10-22T11:20:20Z"}
+                ]},
+                {"displayName":"Claude and GPT models","buckets":[
+                    {"bucketId":"3p-weekly","remainingFraction":0.55,"resetTime":"2026-10-26T07:45:47Z"},
+                    {"bucketId":"3p-5h","remainingFraction":1.0,"resetTime":"2026-10-22T12:06:07Z"}
+                ]},
+                {"displayName":"Gemini 4 Argon","buckets":[
+                    {"bucketId":"gemini-argon-wtu-weekly","remainingFraction":0,"resetTime":"2026-10-27T10:17:34Z"}
+                ]}
+            ]}),
+            "antigravity",
+            "a",
+            Utc::now(),
+        )
+        .unwrap();
+        assert_eq!(q.windows.len(), 5);
+        let g4 = q.windows.iter().find(|w| w.id == "gemini4-weekly").unwrap();
+        assert_eq!(g4.remaining_percent, Some(0.0));
+        assert_eq!(g4.exhausted, Some(true));
+        assert_eq!(g4.duration_seconds, Some(604800));
+        assert_eq!(g4.scope, "feature:gemini4");
+        assert_eq!(g4.resets_at.as_deref(), Some("2026-10-27T10:17:34+00:00"));
+    }
+    #[test]
+    fn antigravity_parses_language_server_response_with_exhausted_argon() {
+        let json = serde_json::json!({
+            "response": {
+                "groups": [
+                    {
+                        "displayName": "Gemini Models",
+                        "buckets": [
+                            {"bucketId": "gemini-5h", "remainingFraction": 0.75, "resetTime": "2026-10-22T11:20:20Z"},
+                            {"bucketId": "gemini-weekly", "remainingFraction": 0.88, "resetTime": "2026-10-24T06:33:44Z"}
+                        ]
+                    },
+                    {
+                        "displayName": "Claude and GPT models",
+                        "buckets": [
+                            {"bucketId": "3p-5h", "remainingFraction": 1.0, "resetTime": "2026-10-22T13:20:21Z"},
+                            {"bucketId": "3p-weekly", "remainingFraction": 0.55, "resetTime": "2026-10-26T07:45:47Z"}
+                        ]
+                    },
+                    {
+                        "displayName": "Gemini 4 Argon",
+                        "buckets": [
+                            {"bucketId": "gemini-argon-wtu-weekly", "remainingFraction": 0, "resetTime": "2026-10-27T10:17:34Z"}
+                        ]
+                    }
+                ]
+            }
+        });
+        let q = parse(&json, "antigravity", "a", chrono::Utc::now()).unwrap();
+        let argon = q.windows.iter().find(|w| w.scope == "feature:gemini4").unwrap();
+        assert_eq!(argon.remaining_percent, Some(0.0));
+        assert_eq!(argon.exhausted, Some(true));
+        assert_eq!(argon.kind, "primary");
+        assert_eq!(argon.resets_at.as_deref(), Some("2026-10-27T10:17:34+00:00"));
     }
 }
