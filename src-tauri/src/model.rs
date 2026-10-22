@@ -301,6 +301,8 @@ impl Default for DisplaySettings {
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     #[serde(default)]
+    pub account_pools: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
     pub proxies: Vec<ProxyProfile>,
     #[serde(default)]
     pub account_proxies: BTreeMap<String, String>,
@@ -326,6 +328,7 @@ pub struct ProxyProfile {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            account_pools: BTreeMap::new(),
             proxies: vec![],
             account_proxies: BTreeMap::new(),
             account_refresh: BTreeMap::new(),
@@ -367,6 +370,7 @@ pub struct SettingsPatch {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AccountSelectionPatch {
+    pub account_pools: Option<BTreeMap<String, Vec<String>>>,
     pub expected_revision: u64,
     pub account_ids: Vec<String>,
     pub aliases: Option<BTreeMap<String, String>>,

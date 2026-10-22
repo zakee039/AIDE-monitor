@@ -101,7 +101,7 @@ export interface SourceStatus {
 }
 export interface Snapshot {
   source: SourceStatus;
-  accounts: AccountSummary[]; // selected accounts only
+  accounts: AccountSummary[]; // selected display entries; quota pools have distinct opaque IDs
   quotas: AccountQuota[];
   availability: AccountAvailability[];
   recommendation: Recommendation;
@@ -141,6 +141,7 @@ export interface UsbThemeDefinition {
 export interface UsbDisplaySettings { enabled: boolean; deviceId: string; themeId: string; customThemes?: UsbThemeDefinition[] }
 export interface ProxyProfile { id: string; name: string; address: string }
 export interface Settings {
+  accountPools?: Record<string, string[]>;
   proxies: ProxyProfile[];
   accountProxies: Record<string, string>;
   accountRefresh: Record<string, number>;
@@ -162,8 +163,9 @@ export interface SettingsPatch {
   display?: Partial<DisplaySettings>;
 }
 export interface AccountSelectionPatch {
+  accountPools?: Record<string, string[]>;
   expectedRevision: number;
-  accountIds: AccountId[]; // unique ordered selection; full replacement
+  accountIds: AccountId[]; // physical IDs from accounts.list; unique ordered selection; full replacement
   aliases?: Record<AccountId, string>; // local presentation only
 }
 

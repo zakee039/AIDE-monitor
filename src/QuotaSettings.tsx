@@ -38,7 +38,7 @@ export function QuotaSettings({ settings, accounts, busy, onChange }: {
       {!available.length && <option value="">{t("请先选择账号")}</option>}
       {available.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
     </select></div>
-    <p className="quota-help">{t("只累计所选平台中已勾选的账号。Antigravity 使用 Gemini 额度池。")}</p>
+    <p className="quota-help">{t("只累计所选平台中已勾选的账号与额度池，沿用订阅档位估算。")}</p>
     <details className="quota-profile-settings"><summary>{t("订阅额度换算（估算）")}</summary>
       <p className="quota-help">{t("自动读取订阅；未返回订阅时暂按基础档估算，无法识别的档位不累计。可在此指定档位。")}</p>
       <p className="quota-help">{t("百分比表示一份完整 5h 额度对应的周额度。Ultra 的 25% 为占位值；Grok 高级档请自定义倍率。")}</p>

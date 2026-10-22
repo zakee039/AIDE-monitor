@@ -47,7 +47,7 @@ Supported sources include official clients, Cockpit Tools, CC Switch, CLIProxyAP
 
 ## Understanding quota values
 
-Totals are calculated separately for each platform. The orb accounts for subscription multipliers and quota windows to estimate available capacity; see the [quota calculation guide (Chinese)](docs/DOMAIN.md) for details. Claude and Antigravity conversion ratios are provisional estimates. Antigravity's built-in account view displays Gemini quota.
+Totals are calculated separately for each platform. The orb accounts for subscription multipliers and quota windows to estimate available capacity; see the [quota calculation guide (Chinese)](docs/DOMAIN.md) for details. Claude and Antigravity conversion ratios are provisional estimates. Antigravity can display Gemini 3, Claude and Gemini 4 as separate quota entries; Gemini 4 has a weekly window only. Grok displays its shared allowance. Select pools in account settings; entries share the original account's proxy and refresh settings.
 
 Quota colors run from red (below 20%) to orange (below 50%), blue (below 80%) and green (80% or above). Failed queries and missing data appear as unknown, never as full quota.
 

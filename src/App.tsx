@@ -1,3 +1,5 @@
+import { PoolPicker } from "./PoolPicker";
+import { selectedPools, poolOptions, displayCount } from "./quota-pools";
 import { quotaBandForPercent } from "./quota-colors";
 import { UsbScreen } from "./UsbScreen";
 import { QuotaSettings } from "./QuotaSettings";
@@ -251,8 +253,8 @@ function windowColumnKey(window?: QuotaWindow): string {
 }
 
 function HudContent({ snapshot, theme, now, onSettings, onRefresh, onHide, onCollapse, busy }: { snapshot: Snapshot; theme: ThemeDocument; now: number; onSettings?: () => void; onRefresh?: () => void; onHide?: () => void; onCollapse?: () => void; busy?: string | null }) {
-  const hasCredits = snapshot.accounts.some(account => account.providerId === "antigravity") || snapshot.quotas.some(quota => quota.resetCreditsAvailable != null);
-  const windowColumns = [...new Set(snapshot.accounts.filter(account => account.providerId !== "grok").flatMap(account => (account.providerId === "antigravity" ? ["duration-18000", "duration-604800"] : displayWindows(snapshot.quotas.find(quota => quota.accountId === account.id)).map(windowColumnKey))))].sort((a, b) => {
+  const hasCredits = snapshot.quotas.some(quota => quota.resetCreditsAvailable != null);
+  const windowColumns = [...new Set(snapshot.accounts.flatMap(account => displayWindows(snapshot.quotas.find(quota => quota.accountId === account.id)).map(windowColumnKey)))].sort((a, b) => {
     const duration = (key: string) => key.startsWith("duration-") ? Number(key.slice(9)) : Infinity;
     return duration(a) - duration(b) || a.localeCompare(b);
   });
@@ -277,9 +279,7 @@ function AccountRow({ account, quota, availability, now, showCredits, windowColu
   const refreshing = pending || quota?.status === "refreshing";
   const status = error ?? statusText(quota, availability);
   const state = error || quota?.error ? "error" : quota?.freshness === "stale" ? "stale" : availability?.state ?? "unknown";
-  const antigravity = account.providerId === "antigravity";
-  const windows = antigravity ? [quota?.windows.find(window => window.id === "gemini-5h"), quota?.windows.find(window => window.id === "gemini-weekly")] : displayWindows(quota);
-  const modelProvider = account.providerId === "grok";
+  const windows = displayWindows(quota);
   const refresh = async () => {
     setPending(true); setError(null);
     try { await call("refresh.request", { accountIds: [account.id] }); }
@@ -289,8 +289,8 @@ function AccountRow({ account, quota, availability, now, showCredits, windowColu
   return localize(<div className={`compact-row state-${state}`} data-tauri-drag-region>
     <button className={`row-refresh ${refreshing ? "refreshing" : ""}`} aria-label={`刷新 ${account.displayName}`} disabled={!interactive || refreshing} onClick={() => { void refresh(); }}><RefreshCw size={13} className={refreshing ? "spin" : ""} /></button>
     <span className="compact-name" translate="no" data-tauri-drag-region><ProviderIcon provider={account.providerId} />{account.displayName}</span>
-    {modelProvider ? <div className="model-quotas">{quota?.windows.map(w => <span className={`model-quota ${quotaBand(w)}`} key={w.id} title={w.label}><small>{w.label}</small><strong>{remainingText(w)}</strong><span>· {durationText(w.resetsAt, now)}</span></span>) ?? <span>—</span>}</div> : windows.map((window, index) => <span className={`compact-quota ${quotaBand(window)}`} style={{ gridColumn: `${4 + (antigravity ? windowColumns.indexOf(index === 0 ? "duration-18000" : "duration-604800") : windowColumns.indexOf(windowColumnKey(window))) * 4} / span 3` }} key={window?.id ?? index} aria-label={`${window?.label ?? "?"} 剩余 ${window ? remainingText(window) : "未知"}，${window ? durationText(window.resetsAt, now) : "待查询"}`} data-tauri-drag-region><strong>{window ? remainingText(window) : "—"}</strong><span className="quota-dot">·</span><span>{window ? durationText(window.resetsAt, now) : "—"}</span></span>)}
-    {showCredits && <span className="reset-credits" style={{ gridColumn: windowColumns.length * 4 + 4 }} aria-label={antigravity ? "gemini额度" : quota?.resetCreditsAvailable != null ? `可用重置次数 ${quota.resetCreditsAvailable}` : "重置次数未知"} data-tauri-drag-region>{antigravity ? "gemini额度" : quota?.resetCreditsAvailable != null ? `R: ${quota.resetCreditsAvailable}` : ""}</span>}
+    {windows.map((window, index) => <span className={`compact-quota ${quotaBand(window)}`} style={{ gridColumn: `${4 + windowColumns.indexOf(windowColumnKey(window)) * 4} / span 3` }} key={window?.id ?? index} aria-label={`${window?.label ?? "?"} 剩余 ${window ? remainingText(window) : "未知"}，${window ? durationText(window.resetsAt, now) : "待查询"}`} data-tauri-drag-region><strong>{window ? remainingText(window) : "—"}</strong><span className="quota-dot">·</span><span>{window ? durationText(window.resetsAt, now) : "—"}</span></span>)}
+    {showCredits && <span className="reset-credits" style={{ gridColumn: windowColumns.length * 4 + 4 }} aria-label={quota?.resetCreditsAvailable != null ? `可用重置次数 ${quota.resetCreditsAvailable}` : "重置次数未知"} data-tauri-drag-region>{quota?.resetCreditsAvailable != null ? `R: ${quota.resetCreditsAvailable}` : ""}</span>}
     {state === "error" && <span className="row-state state-error" role="img" aria-label={status}>!</span>}
   </div>);
 }
@@ -346,6 +346,9 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
   const pickSource = (id: string) => { void perform("source-pick", async () => { const { path } = await internal("sources_pick", {}); if (path) setSources(current => current.map(s => s.id === id ? { ...s, path, enabled: true } : s)); }); };
 
   const [selection, setSelection] = useState<string[]>([]);
+  const [poolChoices, setPoolChoices] = useState<Record<string, string[]>>({});
+  const savedPools = JSON.stringify(state.settings?.accountPools ?? {});
+  useEffect(() => { setPoolChoices(JSON.parse(savedPools)); }, [savedPools]);
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
   const [interval, setIntervalValue] = useState("300");
   const savedSelection = JSON.stringify(state.accounts.filter(account => account.selected).sort((a, b) => a.order - b.order).map(account => account.id));
@@ -356,7 +359,8 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
   const chooseSource = openSources;
   const rescan = () => { void perform("rescan", () => internal("source_rescan", {}), "账号列表已重新读取。"); };
   const changeOrder = (id: string, direction: number) => setSelection(current => { const index = current.indexOf(id); const destination = index + direction; if (index < 0 || destination < 0 || destination >= current.length) return current; const next = [...current]; [next[index], next[destination]] = [next[destination], next[index]]; return next; });
-  const selectionDirty = JSON.stringify(selection) !== JSON.stringify(state.accounts.filter(account => account.selected).sort((a, b) => a.order - b.order).map(account => account.id));
+  const poolCount = displayCount(state.accounts, selection, poolChoices);
+  const selectionDirty = JSON.stringify(poolChoices) !== savedPools || JSON.stringify(selection) !== JSON.stringify(state.accounts.filter(account => account.selected).sort((a, b) => a.order - b.order).map(account => account.id));
   const nav = [{ id: "general", label: "常规", icon: <SlidersHorizontal size={17} /> }, { id: "display", label: "窗口与显示", icon: <Settings2 size={17} /> }, { id: "accounts", label: "账号", icon: <Database size={17} /> }, { id: "themes", label: "外观", icon: <Palette size={17} /> }, { id: "usb", label: "独立监视屏", icon: <Layers3 size={17} /> }, { id: "about", label: "关于", icon: <Info size={17} /> }] as const;
 
   return localize(<div className="settings-shell" style={themeStyle(defaultTheme)}>
@@ -380,8 +384,8 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
         <SettingsCard title="悬浮窗额度" icon={<Settings2 size={17} />}>{settings && <QuotaSettings settings={settings} accounts={state.accounts} busy={busy !== null} onChange={display => patch("quota-display", { display })} />}</SettingsCard>
       </>}
       {section === "accounts" && <><SectionHeading eyebrow="YOUR ACCOUNTS" title="账号" description="勾选要显示的账号，并调整 HUD 中的顺序。" />
-        <div className="account-selection-header"><span>{selection.length} 个已选择 / {state.accounts.length} 个账号</span><button className="text-button" disabled={busy !== null} onClick={rescan}><RefreshCw size={14} className={busy === "rescan" ? "spin" : ""} />重新扫描</button></div>
-        <div className="selection-columns"><span>账号</span><span>代理</span><span>自动刷新</span><span>显示名称</span><span>排序</span></div><div className="selection-list">{state.accounts.length ? [...state.accounts].sort((a, b) => { const ai = selection.indexOf(a.id); const bi = selection.indexOf(b.id); return (ai < 0 ? 1000 + a.order : ai) - (bi < 0 ? 1000 + b.order : bi); }).map(account => <div className={`selection-row ${selection.includes(account.id) ? "chosen" : ""}`} key={account.id}><label><input type="checkbox" checked={selection.includes(account.id)} disabled={busy !== null || account.support === "unsupported"} onChange={event => setSelection(current => event.target.checked ? [...current, account.id] : current.filter(id => id !== account.id))} /><span className="selection-check"><Check size={12} /></span><ProviderIcon provider={account.providerId} /><span className="selection-identity"><strong translate="no">{account.displayName}</strong></span></label><select aria-label={`代理 ${account.displayName}`} value={settings?.accountProxies?.[account.id] ?? ""} disabled={busy !== null || !settings} onChange={event => {
+        <div className="account-selection-header"><span>{selection.length} 个已选择 / {state.accounts.length} 个账号 · {poolCount} 个展示项</span><button className="text-button" disabled={busy !== null} onClick={rescan}><RefreshCw size={14} className={busy === "rescan" ? "spin" : ""} />重新扫描</button></div>
+        <div className="selection-columns"><span>账号</span><span>额度池</span><span>代理</span><span>自动刷新</span><span>显示名称</span><span>排序</span></div><div className="selection-list">{state.accounts.length ? [...state.accounts].sort((a, b) => { const ai = selection.indexOf(a.id); const bi = selection.indexOf(b.id); return (ai < 0 ? 1000 + a.order : ai) - (bi < 0 ? 1000 + b.order : bi); }).map(account => <div className={`selection-row ${selection.includes(account.id) ? "chosen" : ""}`} key={account.id}><label><input type="checkbox" checked={selection.includes(account.id)} disabled={busy !== null || account.support === "unsupported"} onChange={event => { if (event.target.checked && poolOptions(account.providerId).length && !selectedPools(account, poolChoices).length) setPoolChoices(current => ({ ...current, [account.id]: [poolOptions(account.providerId)[0].id] })); setSelection(current => event.target.checked ? [...current, account.id] : current.filter(id => id !== account.id)); }} /><span className="selection-check"><Check size={12} /></span><ProviderIcon provider={account.providerId} /><span className="selection-identity"><strong translate="no">{account.displayName}</strong></span></label><PoolPicker provider={account.providerId} name={account.displayName} value={selectedPools(account, poolChoices)} disabled={busy !== null} onChange={value => { setPoolChoices(current => ({ ...current, [account.id]: value })); setSelection(current => value.length ? current.includes(account.id) ? current : [...current, account.id] : current.filter(id => id !== account.id)); }} /><select aria-label={`代理 ${account.displayName}`} value={settings?.accountProxies?.[account.id] ?? ""} disabled={busy !== null || !settings} onChange={event => {
           const overrides = { ...settings?.accountProxies };
           if (event.target.value) overrides[account.id] = event.target.value; else delete overrides[account.id];
           patch("account-proxy", { accountProxies: overrides });
@@ -390,7 +394,7 @@ function SettingsView({ state, loading, error, notice, busy, perform, reload, on
           if (event.target.value === "") delete overrides[account.id]; else overrides[account.id] = Number(event.target.value);
           patch("account-refresh", { accountRefresh: overrides });
         }}><option value="">-</option><option value="0">禁止</option><option value="60">1min</option><option value="300">5min</option><option value="900">15min</option><option value="3600">1h</option></select><AliasInput account={account} reload={reload} />{<div className={`order-actions ${selection.includes(account.id) ? "" : "order-placeholder"}`}><button className="icon-button" aria-label={`上移 ${account.displayName}`} disabled={busy !== null || selection.indexOf(account.id) === 0} onClick={() => changeOrder(account.id, -1)}><ArrowUp size={14} /></button><button className="icon-button" aria-label={`下移 ${account.displayName}`} disabled={busy !== null || selection.indexOf(account.id) === selection.length - 1} onClick={() => changeOrder(account.id, 1)}><ArrowDown size={14} /></button></div>}</div>) : <div className="empty-state"><Database size={24} /><strong>尚未发现账号</strong><span>选择含 auth.json 或 codex_accounts.json 的目录，再重新扫描。</span><button className="secondary-button" disabled={busy !== null} onClick={chooseSource}>选择数据目录</button></div>}</div>
-        <div className="form-actions"><span>最多显示 {state.capabilities?.maxRefreshAccounts ?? 100} 个账号</span><button className="primary-button" disabled={busy !== null || !settings || !selectionDirty || selection.length > (state.capabilities?.maxRefreshAccounts ?? 100)} onClick={() => { if (settings) void perform("selection", () => call("accounts.selection.update", { expectedRevision: settings.settingsRevision, accountIds: selection }), "账号选择已保存。"); }}>{busy === "selection" ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}保存选择</button></div>
+        <div className="form-actions"><span>最多显示 {state.capabilities?.maxRefreshAccounts ?? 100} 个账号</span><button className="primary-button" disabled={busy !== null || !settings || !selectionDirty || poolCount > (state.capabilities?.maxRefreshAccounts ?? 100)} onClick={() => { if (settings) void perform("selection", () => call("accounts.selection.update", { expectedRevision: settings.settingsRevision, accountIds: selection, accountPools: poolChoices }), "账号选择已保存。"); }}>{busy === "selection" ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}保存选择</button></div>
       </>}
       {section === "themes" && <ThemeManager onChanged={reload} renderPreview={id => {
         const theme = id === "midnight" ? midnightTheme : id === "paper" ? paperTheme : defaultTheme;

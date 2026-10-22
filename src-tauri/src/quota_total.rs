@@ -47,7 +47,7 @@ fn custom(value: &str) -> Option<(f64, f64)> {
         .then_some((m, r / 100.))
 }
 fn policy(platform: &str, q: &AccountQuota, display: &DisplaySettings) -> Option<(f64, f64)> {
-    if let Some(value) = display.quota_profiles.get(&q.account_id) {
+    if let Some(value) = display.quota_profiles.get(crate::quota_pools::source_id(&q.account_id)) {
         return profile(platform, value).or_else(|| custom(value));
     }
     if let Some(name) = &q.plan_type {
@@ -82,6 +82,8 @@ pub fn effective_provider<'a>(requested: &'a str, accounts: &'a [AccountSummary]
 
 fn scoped_quota(q: &AccountQuota, platform: &str) -> AccountQuota {
     let mut q = q.clone();
+    // Projected entries already contain exactly one pool and its own coverage.
+    if crate::quota_pools::source_id(&q.account_id) != q.account_id { return q; }
     if platform == "antigravity" {
         // Match the Gemini pool already displayed in the expanded HUD. Never add model pools.
         q.windows.retain(|w| w.scope == "feature:gemini");
@@ -171,7 +173,8 @@ pub fn calculate(
             .filter(|w| w.scope == "base" && w.applicability == "required")
             .collect();
         let five = required.iter().find(|w| w.duration_seconds == Some(18000));
-        let week = required.iter().find(|w| w.duration_seconds == Some(604800));
+        let week = required.iter().find(|w| w.duration_seconds == Some(604800))
+            .or_else(|| (platform == "grok" && required.len() == 1 && required[0].duration_seconds.is_some_and(|d| d > 0)).then(|| &required[0]));
         let Some(b) = week.and_then(|w| w.remaining_percent) else {
             continue;
         };
@@ -197,7 +200,7 @@ pub fn calculate(
             total += value;
             known += 1;
             estimated |=
-                q.plan_type.is_none() && !display.quota_profiles.contains_key(&q.account_id);
+                q.plan_type.is_none() && !display.quota_profiles.contains_key(crate::quota_pools::source_id(&q.account_id));
         }
     }
     TotalQuota {

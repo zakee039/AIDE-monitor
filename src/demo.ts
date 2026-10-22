@@ -1,3 +1,4 @@
+import { poolOptions, selectedPools } from "./quota-pools";
 import { quotaProvider, selectedQuotaProvider } from "./QuotaSettings";
 import type { AccountQuota, AccountSummary, ApiResult, HudEvent, MethodMap, RefreshJob, Settings, Snapshot, SourceStatus, ThemeSummary, ThemeValidation } from "../contracts/hud-api";
 import { defaultTheme, midnightTheme, paperTheme, type ThemeDocument } from "./themes";
@@ -49,8 +50,8 @@ export function demoSubscribe(listener: (event: HudEvent) => void): () => void {
 }
 
 export function demoSnapshot(): Snapshot {
-  const selected = accounts.filter(account => account.selected).sort((a, b) => a.order - b.order).map((account, index) => ({ ...account, displayName: settings.display.privacyMode ? `${settings.display.locale === "zh-CN" ? "账号" : "Account"} ${index + 1}` : account.displayName }));
-  const quotas: AccountQuota[] = selected.map(account => {
+  let selected = accounts.filter(account => account.selected).sort((a, b) => a.order - b.order).map((account, index) => ({ ...account, displayName: settings.display.privacyMode ? `${settings.display.locale === "zh-CN" ? "账号" : "Account"} ${index + 1}` : account.displayName }));
+  let quotas: AccountQuota[] = selected.map(account => {
     const originalIndex = accounts.findIndex(item => item.id === account.id);
     const old = account.id === "demo-work";
     return {
@@ -114,8 +115,28 @@ export function demoSnapshot(): Snapshot {
       resetsAt: new Date(baseTime + (index ? 99600 : 18000) * 1000).toISOString(),
     })));
   }
+  if (scenario === "providers") for (const q of quotas) {
+    const provider = selected.find(a => a.id === q.accountId)?.providerId;
+    if (provider === "antigravity") q.windows.push({ ...q.windows[1], id: "gemini4-weekly", scope: "feature:gemini4", label: "Gemini 4 Weekly", remainingPercent: 62 });
+    if (provider === "grok") q.windows = [{ ...q.windows[0], id: "credits", scope: "base", label: "Shared quota", durationSeconds: 604800 }];
+  }
+  const poolAccounts: AccountSummary[] = [];
+  const poolQuotas: AccountQuota[] = [];
+  for (const account of selected) {
+    const q = quotas.find(q => q.accountId === account.id)!;
+    if (!poolOptions(account.providerId).length) { poolAccounts.push(account); poolQuotas.push(q); continue; }
+    for (const pool of selectedPools(account, settings.accountPools ?? {})) {
+      const id = `${account.id}::pool:${pool}`;
+      poolAccounts.push({ ...account, id, displayName: `${account.displayName}-${pool}` });
+      const scope = pool === "gemini3" ? "feature:gemini" : pool === "claude" ? "feature:claude" : pool === "gemini4" ? "feature:gemini4" : "base";
+      let windows = q.windows.filter(w => w.scope === scope).map(w => ({ ...w, scope: "base" as const }));
+      if (!windows.length) windows = [{ ...q.windows[0], id: `${pool}-weekly`, scope: "base", remainingPercent: null, measurement: "unknown", exhausted: null, resetsAt: null, durationSeconds: pool === "gemini4" ? 604800 : null }];
+      poolQuotas.push({ ...q, accountId: id, windows, baseCoverageComplete: windows.every(w => w.remainingPercent !== null) });
+    }
+  }
+  selected = poolAccounts; quotas = poolQuotas;
   const availability: Snapshot["availability"] = quotas.map(quota => {
-    if (quota.freshness !== "fresh" || quota.origin !== "network") return { accountId: quota.accountId, state: "unknown", reason: "stale", estimatedAvailableAt: null };
+    if (quota.freshness !== "fresh" || quota.origin !== "network" || !quota.baseCoverageComplete) return { accountId: quota.accountId, state: "unknown", reason: "stale", estimatedAvailableAt: null };
     const blocked = quota.windows.filter(window => window.applicability === "required" && (window.remainingPercent ?? 0) < (window.durationSeconds === 18000 ? 5 : 2));
     return { accountId: quota.accountId, state: blocked.length ? "waiting" : "now", reason: blocked.some(window => window.exhausted) ? "quota_exhausted" : blocked.length ? "below_threshold" : "available", estimatedAvailableAt: blocked.length ? new Date(Math.max(...blocked.map(window => Date.parse(window.resetsAt!)))).toISOString() : null };
   });
@@ -129,7 +150,7 @@ export function demoSnapshot(): Snapshot {
   const hasFive = ownQuotas.some(q => q.windows.some(w => w.durationSeconds === 18000));
   const contributions = ownQuotas.flatMap(quota => {
     if (availability.find(item => item.accountId === quota.accountId)?.state === "unknown") return [];
-    const windows = quota.windows.filter(w => providerId === "antigravity" ? w.scope === "feature:gemini" : w.scope === "base");
+    const windows = quota.windows.filter(w => w.scope === "base");
     const week = windows.find(w => w.durationSeconds === 604800)?.remainingPercent;
     const five = windows.find(w => w.durationSeconds === 18000)?.remainingPercent;
     const profile = settings.display.quotaProfiles?.[quota.accountId] ?? "";
@@ -162,7 +183,7 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
   let response: ApiResult<unknown>;
   if (["settings.update", "accounts.selection.update"].includes(method) && request.expectedRevision !== settings.settingsRevision) return fail("CONFLICT", "设置已更新，请重试。") as ApiResult<MethodMap[M]["result"]>;
   switch (method) {
-    case "capabilities.get": response = result({ appVersion: "0.5.3", apiVersion: "1.0", transport: "tauri", enabledMethods: methods, grantedScopes: ["quota.read", "quota.refresh", "events.read", "settings.read", "settings.write", "themes.read", "themes.write", "window.control", "diagnostics.read"], themeSchemaVersions: [1], providerIds: ["codex"], maxRefreshAccounts: 100 }); break;
+    case "capabilities.get": response = result({ appVersion: "0.7.0", apiVersion: "1.0", transport: "tauri", enabledMethods: methods, grantedScopes: ["quota.read", "quota.refresh", "events.read", "settings.read", "settings.write", "themes.read", "themes.write", "window.control", "diagnostics.read"], themeSchemaVersions: [1], providerIds: ["codex"], maxRefreshAccounts: 100 }); break;
     case "accounts.list": response = result(accounts.map((account, index) => ({ ...account, displayName: settings.display.privacyMode ? `${settings.display.locale === "zh-CN" ? "账号" : "Account"} ${index + 1}` : account.displayName }))); break;
     case "quota.snapshot.get": response = result(demoSnapshot()); break;
     case "recommendation.get": response = result(demoSnapshot().recommendation); break;
@@ -175,7 +196,7 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
       const ids = request.accountIds as string[];
       if (!Array.isArray(ids) || new Set(ids).size !== ids.length || ids.some(id => !accounts.some(account => account.id === id))) { response = fail("INVALID_ARGUMENT", "账号选择无效。"); break; }
       accounts = accounts.map(account => ({ ...account, selected: ids.includes(account.id), order: ids.indexOf(account.id) >= 0 ? ids.indexOf(account.id) : accounts.length }));
-      settings = { ...settings, display: { ...settings.display, quotaProvider: selectedQuotaProvider(settings, accounts) }, settingsRevision: settings.settingsRevision + 1 };
+      settings = { ...settings, ...(request.accountPools ? { accountPools: request.accountPools as Record<string, string[]> } : {}), display: { ...settings.display, quotaProvider: selectedQuotaProvider(settings, accounts) }, settingsRevision: settings.settingsRevision + 1 };
       emit("settings.changed"); emit("snapshot.changed"); response = result(settings); break;
     }
     case "refresh.request": {
@@ -204,7 +225,7 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
       settings.settingsRevision++; emit("snapshot.changed"); response = result(settings); break;
     }
     case "window.control": response = result({ accepted: true }); break;
-    case "diagnostics.get": response = result({ appVersion: "0.5.3", adapterVersion: "演示", source, selectedAccountCount: accounts.filter(account => account.selected).length, activeJobCount: refreshing ? 1 : 0, recentErrorCodes: [] }); break;
+    case "diagnostics.get": response = result({ appVersion: "0.7.0", adapterVersion: "演示", source, selectedAccountCount: accounts.filter(account => account.selected).length, activeJobCount: refreshing ? 1 : 0, recentErrorCodes: [] }); break;
     default: response = fail("INVALID_ARGUMENT", "此功能尚未提供。");
   }
   return response as ApiResult<MethodMap[M]["result"]>;

@@ -16,22 +16,23 @@ pub fn request(client: &Client, c: &Credentials) -> Result<RequestBuilder, ApiEr
             .get("https://api.anthropic.com/api/oauth/usage")
             .header("anthropic-beta", "oauth-2025-04-20"),
         "antigravity" => client
-            .post(if c.gcp {
-                "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
-            } else {
-                "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
-            })
+            .post(
+                if c.gcp && valid_project(c.project_id.as_deref()).is_some() {
+                    "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
+                } else {
+                    "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
+                },
+            )
             .json(
-                &c.project_id
-                    .as_ref()
+                &valid_project(c.project_id.as_deref())
                     .map(|p| json!({"project":p}))
                     .unwrap_or(json!({})),
             ),
         "grok" => client
             .get("https://cli-chat-proxy.grok.com/v1/billing?format=credits")
             .header("x-xai-token-auth", "xai-grok-cli")
-            .header("x-grok-cli-version", "0.2.93")
-            .header("x-grok-client-version", "0.2.93")
+            .header("x-grok-cli-version", "1.0.52")
+            .header("x-grok-client-version", "1.0.52")
             .header("x-grok-client-surface", "grok-cli")
             .header("x-grok-client-identifier", "aide-monitor"),
         _ => return Err(ApiError::new("ACCOUNT_UNSUPPORTED", "不支持此平台")),
@@ -43,10 +44,15 @@ pub fn request(client: &Client, c: &Credentials) -> Result<RequestBuilder, ApiEr
             "User-Agent",
             match c.provider.as_str() {
                 "antigravity" => "antigravity/1.20.5 windows/amd64",
-                "grok" => "grok-cli/0.2.93",
+                "grok" => "grok-cli/1.0.52",
                 _ => concat!("AIDE-monitor/", env!("CARGO_PKG_VERSION")),
             },
         ))
+}
+fn valid_project(project: Option<&str>) -> Option<&str> {
+    project
+        .map(str::trim)
+        .filter(|p| !p.is_empty() && *p != "aicode-consumers")
 }
 fn percent(v: Option<f64>) -> Option<f64> {
     v.filter(|v| v.is_finite() && (0.0..=100.0).contains(v))
@@ -84,13 +90,20 @@ fn window(
     }
 }
 fn number(v: &Value) -> Option<f64> {
-    v.as_f64().or_else(|| v.get("val").and_then(Value::as_f64))
+    v.as_f64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        .or_else(|| v.get("val").and_then(number))
+        .filter(|n| n.is_finite())
 }
 fn remaining(v: &Value) -> Option<f64> {
-    percent(v.get("usagePercent").and_then(Value::as_f64))
+    percent(v.get("usagePercent").and_then(number))
         .map(|v| 100.0 - v)
         .or_else(|| {
-            let total = number(v.get("total")?)?;
+            let total = number(
+                v.get("total")
+                    .or_else(|| v.get("limit"))
+                    .or_else(|| v.get("allocation"))?,
+            )?;
             if total <= 0.0 {
                 return None;
             }
@@ -108,6 +121,8 @@ pub fn plan_type(v: &Value) -> Option<String> {
         "/planType",
         "/subscription_type",
         "/subscriptionTier",
+        "/subscription_tier",
+        "/config/subscriptionTier",
         "/tier/id",
         "/config/planType",
     ]
@@ -162,8 +177,16 @@ pub fn parse(
             for (family, label, aliases) in [
                 ("gemini", "Gemini", ["gemini", "gemini"]),
                 ("claude", "Claude", ["3p", "claude"]),
+                (
+                    "gemini4",
+                    "Gemini 4",
+                    ["gemini-argon-wtu", "gemini-argon-wtu"],
+                ),
             ] {
                 for (period, duration) in [("5h", 18000), ("weekly", 604800)] {
+                    if family == "gemini4" && period == "5h" {
+                        continue;
+                    }
                     let matching: Vec<_> = buckets
                         .iter()
                         .filter(|b| {
@@ -175,6 +198,9 @@ pub fn parse(
                             })
                         })
                         .collect();
+                    if family == "gemini4" && matching.is_empty() {
+                        continue;
+                    }
                     let values: Option<Vec<f64>> = matching
                         .iter()
                         .map(|b| {
@@ -211,43 +237,91 @@ pub fn parse(
             }
         }
         "grok" => {
-            if let Some(c) = v.get("config").filter(|v| v.is_object()) {
-                let reset = date(c.pointer("/currentPeriod/end"));
-                let p = percent(c.get("creditUsagePercent").and_then(Value::as_f64))
+            if let Some(c) = v.get("config").or(Some(v)).filter(|v| v.is_object()) {
+                let reset = date(c.pointer("/currentPeriod/end"))
+                    .or_else(|| date(c.get("billingPeriodEnd")));
+                let unified = c.get("isUnifiedBillingUser").and_then(Value::as_bool) == Some(true);
+                let period = c
+                    .pointer("/currentPeriod/type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_ascii_uppercase();
+                let legacy_total = c.get("monthlyLimit").and_then(number);
+                let duration = match period.as_str() {
+                    "WEEKLY" | "USAGE_PERIOD_TYPE_WEEKLY" => Some(604800),
+                    "MONTHLY" | "USAGE_PERIOD_TYPE_MONTHLY" => period_duration(c),
+                    _ if !unified && legacy_total.is_some_and(|n| n > 0.) => period_duration(c),
+                    _ => None,
+                };
+                let p = percent(c.get("creditUsagePercent").and_then(number))
                     .map(|p| 100.0 - p)
-                    .or_else(|| c.get("weeklyCredits").and_then(remaining));
-                if c.get("creditUsagePercent").is_some() || c.get("weeklyCredits").is_some() {
+                    .or_else(|| {
+                        [
+                            "sharedPool",
+                            "weeklyCredits",
+                            "subscriptionCredits",
+                            "includedCredits",
+                        ]
+                        .iter()
+                        .find_map(|key| c.get(key).and_then(remaining))
+                    })
+                    .or_else(|| {
+                        if unified {
+                            None
+                        } else {
+                            [
+                                c.get("credits"),
+                                v.get("credits"),
+                                v.get("usage"),
+                                v.get("creditBalance"),
+                            ]
+                            .into_iter()
+                            .flatten()
+                            .find_map(remaining)
+                        }
+                    })
+                    .or_else(|| {
+                        if unified {
+                            return None;
+                        }
+                        let total = legacy_total.filter(|n| *n > 0.)?;
+                        let used = c.get("used").and_then(|v| {
+                            if v.as_object().is_some_and(|o| o.is_empty()) {
+                                Some(0.)
+                            } else {
+                                number(v)
+                            }
+                        })?;
+                        percent(Some(100. * (1. - used / total)))
+                    })
+                    // Proto3 can omit zero usage, but only a complete known period supports that inference.
+                    .or_else(|| {
+                        (!c.get("creditUsagePercent").is_some()
+                            && matches!(
+                                period.as_str(),
+                                "WEEKLY"
+                                    | "MONTHLY"
+                                    | "USAGE_PERIOD_TYPE_WEEKLY"
+                                    | "USAGE_PERIOD_TYPE_MONTHLY"
+                            )
+                            && period_duration(c).is_some())
+                        .then_some(100.)
+                    });
+                if p.is_some()
+                    || c.get("creditUsagePercent").is_some()
+                    || c.get("sharedPool").is_some()
+                    || c.get("weeklyCredits").is_some()
+                {
                     windows.push(window(
                         "credits",
-                        "Credits",
+                        "Shared quota",
                         "base",
                         p,
                         reset.clone(),
-                        if c.pointer("/currentPeriod/type").and_then(Value::as_str)
-                            == Some("weekly")
-                        {
-                            Some(604800)
-                        } else {
-                            None
-                        },
+                        duration,
                     ));
                 }
-                if let Some(products) = c.get("productUsage").and_then(Value::as_array) {
-                    for (i, p) in products.iter().take(100).enumerate() {
-                        let name = p
-                            .get("product")
-                            .and_then(Value::as_str)
-                            .unwrap_or("Product");
-                        windows.push(window(
-                            &format!("product-{i}"),
-                            name,
-                            &format!("feature:{i}"),
-                            remaining(p),
-                            reset.clone(),
-                            None,
-                        ));
-                    }
-                }
+                // productUsage is consumption attribution, not an independent allowance.
             }
         }
         _ => {}
@@ -285,9 +359,64 @@ pub fn parse(
     q.windows = windows;
     Ok(q)
 }
+fn period_duration(c: &Value) -> Option<u64> {
+    let start =
+        date(c.pointer("/currentPeriod/start")).or_else(|| date(c.get("billingPeriodStart")))?;
+    let end = date(c.pointer("/currentPeriod/end")).or_else(|| date(c.get("billingPeriodEnd")))?;
+    let seconds = (DateTime::parse_from_rfc3339(&end).ok()?
+        - DateTime::parse_from_rfc3339(&start).ok()?)
+    .num_seconds();
+    (seconds > 0).then_some(seconds as u64)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn grok_shared_pool_does_not_use_purchased_credits_or_product_shares() {
+        let q = parse(&json!({"credits":{"total":100,"used":100},"config":{
+            "isUnifiedBillingUser":true,"sharedPool":{"total":"100","remaining":{"val":"75"}},
+            "currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-10-20T00:00:00Z","end":"2026-10-27T00:00:00Z"},
+            "productUsage":[{"product":"Grok Build","usagePercent":90}]
+        }}), "grok", "a", Utc::now()).unwrap();
+        assert_eq!(q.windows.len(), 1);
+        assert_eq!(q.windows[0].remaining_percent, Some(75.));
+        assert_eq!(q.windows[0].duration_seconds, Some(604800));
+        assert!(parse(&json!({"config":{"isUnifiedBillingUser":true,"productUsage":[{"usagePercent":20}],"credits":{"total":100,"remaining":70}}}), "grok", "a", Utc::now()).is_err());
+    }
+    #[test]
+    fn grok_monthly_period_and_omitted_zero_are_not_assumed_weekly() {
+        let q = parse(&json!({"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_MONTHLY","start":"2026-10-01T00:00:00Z","end":"2026-11-01T00:00:00Z"}}}), "grok", "a", Utc::now()).unwrap();
+        assert_eq!(q.windows[0].remaining_percent, Some(100.));
+        assert_eq!(q.windows[0].duration_seconds, Some(31 * 86400));
+        assert!(parse(
+            &json!({"config":{"currentPeriod":{"type":"weekly"}}}),
+            "grok",
+            "a",
+            Utc::now()
+        )
+        .is_err());
+        let q = parse(&json!({"config":{"monthlyLimit":{"val":100},"used":{},"billingPeriodStart":"2026-10-01T00:00:00Z","billingPeriodEnd":"2026-11-01T00:00:00Z"}}), "grok", "a", Utc::now()).unwrap();
+        assert_eq!(q.windows[0].remaining_percent, Some(100.));
+        assert_eq!(q.windows[0].duration_seconds, Some(31 * 86400));
+    }
+    #[test]
+    fn consumer_placeholder_and_orphan_gcp_flag_do_not_route_to_enterprise() {
+        for project in [None, Some("aicode-consumers"), Some("  ")] {
+            let c = Credentials {
+                provider: "antigravity".into(),
+                access_token: "synthetic".into(),
+                account_id: None,
+                project_id: project.map(str::to_string),
+                gcp: true,
+            };
+            let r = request(&Client::new(), &c).unwrap().build().unwrap();
+            assert_eq!(
+                r.url().host_str(),
+                Some("daily-cloudcode-pa.googleapis.com")
+            );
+            assert_eq!(r.body().unwrap().as_bytes().unwrap(), b"{}");
+        }
+    }
     #[test]
     fn antigravity_preserves_family_and_period() {
         let q = parse(&json!({"groups":[{"buckets":[

@@ -430,7 +430,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline-color:
 .theme-manager .theme-option-info button { border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px; }
 
 /* Dense account table. Columns stay aligned while aliases save in place. */
-.selection-columns, .selection-row { display: grid; grid-template-columns: minmax(90px, 1fr) 76px 68px minmax(90px, 140px) 52px; gap: 8px; align-items: center; }
+.selection-columns, .selection-row { display: grid; grid-template-columns: minmax(100px, 1fr) 118px 76px 68px minmax(90px, 140px) 52px; gap: 8px; align-items: center; }
 .selection-columns { padding: 7px 14px; color: var(--text-muted); font-size: 12px; }
 .selection-row { padding: 9px 14px; min-height: 48px; }
 .selection-row > label { width: 100%; gap: 10px; }
@@ -491,3 +491,18 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline-color:
 .quota-custom label { display: grid; gap: 4px; font-size: 12px; }
 .quota-custom input { width: 100px; }
 .selection-row > select { padding-left: 7px; padding-right: 3px; min-width: 0; }
+
+.selection-list { overflow: visible; }
+.selection-row:first-child { border-radius: 10px 10px 0 0; }
+.selection-row:last-child { border-radius: 0 0 10px 10px; }
+.pool-picker { position: relative; min-width: 0; }
+.pool-trigger { display: flex; align-items: center; justify-content: space-between; gap: 5px; width: 100%; min-height: 33px; padding: 5px 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); color: var(--text); font: inherit; }
+.pool-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pool-trigger > svg { flex-shrink: 0; }
+.pool-unavailable { color: var(--text-muted); text-align: center; }
+.pool-menu { position: absolute; z-index: 20; top: calc(100% + 5px); left: 0; width: 220px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px #183b3120; }
+.pool-menu label { padding: 3px 6px; border-radius: 5px; }
+.pool-menu label:hover { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.selection-row .pool-menu label input { left: 2px; }
+.pool-menu small { display: block; padding: 7px 6px 3px; color: var(--text-muted); line-height: 1.5; }
+@media (max-width: 900px) { .selection-columns, .selection-row { grid-template-columns: minmax(95px, 1fr) 100px 65px 62px minmax(80px, 1fr) 48px; gap: 6px; } }

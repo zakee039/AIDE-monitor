@@ -3,6 +3,10 @@ import { cloneElement, isValidElement, type ReactNode } from "react";
 let language = "en";
 export function setLanguage(locale: string) { language = locale; }
 const en: Record<string, string> = {
+  "额度池": "Quota pools", "选择额度池": "Select pools", "共享额度": "Shared quota",
+  "产品消耗占比不作为独立额度池。": "Product usage shares are not separate quota pools.",
+  "每个额度池单独展示；未返回的额度显示 —。": "Each pool is shown separately. Unavailable quotas show —.",
+  "只累计所选平台中已勾选的账号与额度池，沿用订阅档位估算。": "Totals include selected accounts and pools on this platform, using subscription estimates.",
   "悬浮窗额度显示": "Floating quota display",
   "悬浮窗额度": "Floating quota",
   "请先选择账号": "Select an account first",

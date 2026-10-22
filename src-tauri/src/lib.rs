@@ -4,6 +4,7 @@ mod domain;
 mod model;
 mod network;
 mod quota_total;
+mod quota_pools;
 mod service;
 mod smoke;
 mod startup;

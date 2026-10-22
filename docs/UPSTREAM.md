@@ -105,3 +105,10 @@ HUD 第一版只做标准 OAuth 用途：
 本项目是独立 Tauri 应用，通过自己的存储适配器读取 Cockpit 账号，再通过自己的配额适配器请求和解析 usage。未复制上游实现，没有把 cockpit-core 编译或动态加载为依赖，因此不属于直接 fork 后同步源码的产品。
 
 上游更新时，可参考其新的请求字段、认证约定和响应结构，修改 `adapters/cockpit.rs` / `adapters/usage.rs`，补合成样本和回归检查，再发布 HUD 更新。查询层更新与主题、窗口、5% / 2% 本地推荐规则分离。不能直接替换整个上游模块：它可能同时刷新 token、写账号文件、管理订阅，且依赖上游内部类型。若直接复制代码，仍须遵守对应版本的许可要求。当前没有自动跟踪、下载或执行上游代码。
+
+
+## 2026-10-22 额度池适配核对
+
+核对 Cockpit Tools main `76fbea02ba8ab5a071205a0bfa59ef4db5cc64b4`（v1.3.73）与 v1.3.69 的 Grok 变化。Grok 独立解析共享额度池与实际周/月周期，不把 `productUsage` 占比或统一计费账号的购买余额当作独立额度；请求版本采用该上游当前兜底 1.0.52。Antigravity 排除 `aicode-consumers` 占位项目，企业路由同时要求 GCP 标记和有效项目。
+
+Gemini 4 Argon 的独立周池字段 `gemini-argon-wtu-weekly` 核对自 [ClaudeBar 的直接接口解析](https://github.com/tddworks/ClaudeBar/blob/main/Modules/Providers/Resources/Providers/antigravity-usage.js)。本项目独立实现字段解析，未复制其实现。该池没有返回时显示未知，不能用 Gemini 3 的额度填充。Cockpit 当前前端仍以 Gemini／Claude 两类显示，不能以其页面分组推断全部服务端额度池。

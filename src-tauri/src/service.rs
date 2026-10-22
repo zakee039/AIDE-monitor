@@ -329,6 +329,7 @@ impl Service {
                     .map(|a| a.summary.id.clone())
                     .collect::<HashSet<_>>();
                 config.selected_ids.retain(|id| known.contains(id));
+                config.settings.account_pools.retain(|id, _| known.contains(id));
                 let summaries: Vec<_> = accounts.iter().map(|a| a.summary.clone()).collect();
                 config.settings.display.quota_provider = crate::quota_total::effective_provider(
                     &config.settings.display.quota_provider,
@@ -535,6 +536,7 @@ impl Service {
                 result
             })
             .collect::<Vec<_>>();
+        let (accounts, quotas) = crate::quota_pools::project(accounts, quotas, &d.config.settings.account_pools);
         let availability = quotas
             .iter()
             .map(|q| domain::evaluate(q, now))
@@ -662,6 +664,28 @@ impl Service {
         }
         let mut config = d.config.clone();
         config.selected_ids = patch.account_ids;
+        if let Some(pools) = patch.account_pools {
+            for (id, choices) in &pools {
+                let account = d.accounts.iter().find(|a| &a.summary.id == id)
+                    .ok_or_else(|| ApiError::new("INVALID_ARGUMENT", "额度池账号不存在"))?;
+                let allowed = crate::quota_pools::options(&account.summary.provider_id);
+                if allowed.is_empty() || choices.len() > allowed.len()
+                    || choices.iter().collect::<HashSet<_>>().len() != choices.len()
+                    || choices.iter().any(|p| !allowed.contains(&p.as_str())) {
+                    return Err(ApiError::new("INVALID_ARGUMENT", "额度池选择无效"));
+                }
+            }
+            config.settings.account_pools = pools;
+        }
+        let mut display_count = 0;
+        for id in &config.selected_ids {
+            let account = d.accounts.iter().find(|a| &a.summary.id == id).unwrap();
+            let count = if crate::quota_pools::options(&account.summary.provider_id).is_empty() { 1 }
+                else { crate::quota_pools::selected(&account.summary.provider_id, id, &config.settings.account_pools).len() };
+            if count == 0 { return Err(ApiError::new("INVALID_ARGUMENT", "所选账号至少需要一个额度池")); }
+            display_count += count;
+        }
+        if display_count > 100 { return Err(ApiError::new("INVALID_ARGUMENT", "最多显示 100 个账号或额度池")); }
         let selected_accounts: Vec<_> = config
             .selected_ids
             .iter()
@@ -910,9 +934,11 @@ impl Service {
                 ApiError::new("SOURCE_NOT_FOUND", "请先选择 Cockpit 数据目录")
             }));
         }
-        let ids = request
+        let requested = request
             .account_ids
             .unwrap_or_else(|| d.config.selected_ids.clone());
+        let displayed = Self::snapshot_locked(&mut d).accounts;
+        let ids = crate::quota_pools::refresh_ids(requested, &d.config.selected_ids, &displayed)?;
         let set = ids.iter().cloned().collect::<HashSet<_>>();
         if ids.is_empty()
             || ids.len() > 100
@@ -1296,13 +1322,17 @@ impl Service {
         d.last_tick = Instant::now();
         d.last_wall = now;
         let refresh_settings = d.config.settings.clone();
+        let pool_scopes: HashMap<String, Vec<&str>> = d.accounts.iter().map(|a| (
+            a.summary.id.clone(), crate::quota_pools::selected(&a.summary.provider_id, &a.summary.id, &refresh_settings.account_pools)
+                .into_iter().map(crate::quota_pools::scope).collect()
+        )).collect();
         for (id, quota) in &mut d.quotas {
             let interval = refresh_settings.account_interval(id).unwrap_or(interval);
             let old = quota.freshness.clone();
             domain::update_freshness(quota, now, interval);
             changed |= old != quota.freshness;
             for window in &quota.windows {
-                if window.scope == "base" && window.applicability == "required" {
+                if (window.scope == "base" || pool_scopes.get(id).is_some_and(|scopes| scopes.contains(&window.scope.as_str()))) && window.applicability == "required" {
                     if let Some(reset) = &window.resets_at {
                         if DateTime::parse_from_rfc3339(reset).is_ok_and(|t| t <= now) {
                             reset_keys.push((id.clone(), format!("{id}:{reset}")))
@@ -1590,6 +1620,7 @@ mod tests {
         assert_eq!(service.settings().refresh_interval_seconds, 300);
         assert!(service
             .select_accounts(AccountSelectionPatch {
+                account_pools: None,
                 expected_revision: 0,
                 account_ids: vec!["missing".into()],
                 aliases: None
@@ -1651,6 +1682,7 @@ mod tests {
         let id = service.accounts(true)[0].id.clone();
         service
             .select_accounts(AccountSelectionPatch {
+                account_pools: None,
                 expected_revision: service.settings().settings_revision,
                 account_ids: vec![id.clone()],
                 aliases: None,
@@ -1658,6 +1690,30 @@ mod tests {
             .unwrap();
         service.data.lock().unwrap().config.settings.auto_refresh = false;
         (dir, service, id)
+    }
+
+    #[test]
+    fn pool_selection_persists_projects_snapshot_and_rejects_invalid_choices() {
+        let (dir, service, id) = synthetic_service();
+        service.data.lock().unwrap().accounts[0].summary.provider_id = "antigravity".into();
+        let save = |pools: Vec<&str>| service.select_accounts(serde_json::from_value(json!({
+            "expectedRevision": service.settings().settings_revision,
+            "accountIds": [id.clone()], "accountPools": {id.clone(): pools}
+        })).unwrap());
+        assert!(save(vec!["gemini3", "claude", "gemini4"]).is_ok());
+        let snapshot = service.snapshot();
+        assert_eq!(snapshot.accounts.len(), 3);
+        assert_eq!(snapshot.quotas.len(), 3);
+        assert_eq!(snapshot.provider_totals["antigravity"].recommendation.as_ref().unwrap().coverage.selected, 3);
+        let loaded = config::load(&dir.path().join("hud/settings.json")).unwrap();
+        assert_eq!(loaded.settings.account_pools[&id], ["gemini3", "claude", "gemini4"]);
+        for choices in [vec![], vec!["gemini3", "gemini3"], vec!["other"], vec!["shared"]] {
+            assert!(save(choices).is_err());
+        }
+        assert_eq!(service.snapshot().accounts.len(), 3);
+        assert!(save(vec!["claude"]).is_ok());
+        assert!(service.snapshot().accounts[0].display_name.ends_with("-claude"));
+        assert_eq!(service.accounts(true).len(), 1);
     }
 
     fn synthetic_quota(id: &str, exhausted: bool) -> AccountQuota {
@@ -1991,6 +2047,7 @@ mod tests {
         let select = |ids: Vec<String>| {
             service
                 .select_accounts(AccountSelectionPatch {
+                account_pools: None,
                     expected_revision: service.settings().settings_revision,
                     account_ids: ids,
                     aliases: None,
