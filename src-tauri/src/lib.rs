@@ -3,9 +3,10 @@ mod config;
 mod domain;
 mod model;
 mod network;
-mod quota_total;
-mod quota_pools;
 mod quota_history;
+mod quota_learning;
+mod quota_pools;
+mod quota_total;
 mod service;
 mod smoke;
 mod startup;
@@ -323,7 +324,10 @@ fn aide_theme_builtin(
     request: Value,
 ) -> ApiResult<Value> {
     if window.label() == "usb-display" {
-        return respond::<Value>(&service, Err(ApiError::new("FORBIDDEN", "独立监视屏使用独立主题")));
+        return respond::<Value>(
+            &service,
+            Err(ApiError::new("FORBIDDEN", "独立监视屏使用独立主题")),
+        );
     }
     respond(
         &service,
@@ -332,9 +336,7 @@ fn aide_theme_builtin(
             .and_then(|r| {
                 themes::get(
                     &service.theme_dir,
-                    &r.id.unwrap_or_else(|| {
-                        service.settings().active_theme_id
-                    }),
+                    &r.id.unwrap_or_else(|| service.settings().active_theme_id),
                 )
             }),
     )

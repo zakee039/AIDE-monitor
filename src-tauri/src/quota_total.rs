@@ -1,4 +1,4 @@
-//! Local estimates in base-subscription units. Ratios are policy, not provider guarantees.
+//! Local estimates in base-subscription units. Ratios are learned estimates, not provider guarantees.
 use crate::{domain, model::*};
 use chrono::{DateTime, Utc};
 use std::collections::HashSet;
@@ -11,71 +11,62 @@ pub fn provider(id: &str) -> &str {
     }
 }
 
-// (5h capacity multiplier, fraction of own weekly budget consumed by a full 5h window).
-// For weekly-only subscriptions, the configured multiplier describes weekly capacity.
-// Their own 5h ratio is unused; mixed pools convert using the platform base ratio.
-pub fn profile(platform: &str, name: &str) -> Option<(f64, f64)> {
+// Subscription multipliers remain explicit. Cycle ratios always come from measurements.
+pub fn profile(platform: &str, name: &str) -> Option<f64> {
     let name = name.to_ascii_lowercase().replace(['-', ' ', '_'], "");
     match (platform, name.as_str()) {
         ("chatgpt", "plus" | "plus5h" | "plus7d" | "team" | "team5h" | "team7d" | "business") => {
-            Some((1., 0.15))
+            Some(1.)
         }
-        ("chatgpt", "pro5x") => Some((5., 0.15)),
-        ("chatgpt", "pro10x") => Some((10., 0.15)),
-        ("chatgpt", "pro20x") => Some((20., 0.15)),
-        ("claude", "pro") => Some((1., 0.15)),
-        ("claude", "max5x" | "defaultclaudemax5x") => Some((5., 0.10)),
-        ("claude", "max20x" | "defaultclaudemax20x") => Some((20., 0.20)),
-        ("antigravity", "pro" | "googleaipro") => Some((1., 0.25)),
-        ("antigravity", "ultra5x") => Some((5., 0.25)),
-        ("grok", "supergrok") => Some((1., 0.15)),
+        ("chatgpt", "pro5x")
+        | ("claude", "max5x" | "defaultclaudemax5x")
+        | ("antigravity", "ultra5x") => Some(5.),
+        ("chatgpt", "pro10x") => Some(10.),
+        ("chatgpt", "pro20x") | ("claude", "max20x" | "defaultclaudemax20x") => Some(20.),
+        ("claude", "pro") | ("antigravity", "pro" | "googleaipro") | ("grok", "supergrok") => {
+            Some(1.)
+        }
         _ => None,
     }
 }
-
 pub fn valid_profile(platform: &str, value: &str) -> bool {
     profile(platform, value).is_some() || custom(value).is_some()
 }
-fn custom(value: &str) -> Option<(f64, f64)> {
+fn custom(value: &str) -> Option<f64> {
     let parts: Vec<_> = value.split(':').collect();
-    if parts.len() != 3 || parts[0] != "custom" {
+    if !(parts.len() == 2 || parts.len() == 3) || parts[0] != "custom" {
         return None;
     }
     let m: f64 = parts[1].parse().ok()?;
-    let r: f64 = parts[2].parse().ok()?;
-    (m.is_finite() && r.is_finite() && (0.01..=1000.).contains(&m) && (0.01..=100.).contains(&r))
-        .then_some((m, r / 100.))
-}
-fn policy(platform: &str, q: &AccountQuota, display: &DisplaySettings) -> Option<(f64, f64)> {
-    let pool_policy = |value: (f64, f64)| {
-        // User-calibrated third-party pool; Gemini keeps its separate 25% estimate.
-        if platform == "antigravity" && q.account_id.ends_with("::pool:claude") {
-            (value.0, 0.50)
-        } else {
-            value
+    // Read historical settings, but never apply their stored manual ratio.
+    if parts.len() == 3 {
+        let old: f64 = parts[2].parse().ok()?;
+        if !old.is_finite() || !(0.01..=100.).contains(&old) {
+            return None;
         }
-    };
+    }
+    (m.is_finite() && (0.01..=1000.).contains(&m)).then_some(m)
+}
+fn policy(platform: &str, q: &AccountQuota, display: &DisplaySettings) -> Option<f64> {
+    if let Some((_, pool)) = q.account_id.split_once("::pool:") {
+        if !matches!(pool, "base" | "gemini3" | "claude" | "gemini4" | "shared") {
+            return None;
+        }
+    }
     if let Some(value) = display
         .quota_profiles
         .get(crate::quota_pools::source_id(&q.account_id))
     {
-        return custom(value).or_else(|| profile(platform, value).map(pool_policy));
+        return custom(value).or_else(|| profile(platform, value));
     }
     if let Some(name) = &q.plan_type {
-        return profile(platform, name).map(pool_policy);
+        return profile(platform, name);
     }
-    // The UI explicitly identifies this fallback as a base-plan estimate.
-    Some(pool_policy((1., base_ratio(platform))))
+    Some(1.)
 }
-pub fn weekly_ratio(provider_id: &str, q: &AccountQuota, display: &DisplaySettings) -> Option<f64> {
-    policy(provider(provider_id), q, display).map(|(_, ratio)| ratio)
-}
-fn base_ratio(platform: &str) -> f64 {
-    if platform == "antigravity" {
-        0.25
-    } else {
-        0.15
-    }
+pub fn weekly_ratio(q: &AccountQuota) -> Option<f64> {
+    q.five_hour_weekly_ratio
+        .filter(|r| r.is_finite() && *r > 0. && *r <= 1.)
 }
 
 pub fn effective_provider<'a>(requested: &'a str, accounts: &'a [AccountSummary]) -> &'a str {
@@ -185,6 +176,7 @@ pub fn calculate(
             w.scope == "base" && w.duration_seconds == Some(18000) && w.applicability == "required"
         })
     });
+    let reference_ratio = quotas.iter().find_map(weekly_ratio);
     let mut total = 0.;
     let mut known = 0;
     let mut estimated = false;
@@ -213,31 +205,34 @@ pub fn calculate(
         let Some(b) = week.and_then(|w| w.remaining_percent) else {
             continue;
         };
-        let Some((m, ratio)) = policy(platform, q, display) else {
+        let Some(m) = policy(platform, q, display) else {
             continue;
         };
         let contribution = match five {
-            Some(w) if required.len() == 2 => w.remaining_percent.map(|a| {
+            Some(w) if required.len() == 2 => w.remaining_percent.and_then(|a| {
                 if a < 5. || b < 2. {
-                    0.
+                    Some(0.)
                 } else {
-                    m * a.min(b / ratio)
+                    Some(m * weekly_ratio(q).map_or(a, |ratio| a.min(b / ratio)))
                 }
             }),
-            None if required.len() == 1 => Some(if has_five {
-                b * m / base_ratio(platform)
-            } else {
-                b * m
-            }),
+            None if required.len() == 1 => {
+                if has_five {
+                    Some(reference_ratio.map_or(b * m, |ratio| b * m / ratio))
+                } else {
+                    Some(b * m)
+                }
+            }
             _ => None,
         };
         if let Some(value) = contribution {
             total += value;
             known += 1;
-            estimated |= q.plan_type.is_none()
-                && !display
-                    .quota_profiles
-                    .contains_key(crate::quota_pools::source_id(&q.account_id));
+            estimated |= five.is_some()
+                || q.plan_type.is_none()
+                    && !display
+                        .quota_profiles
+                        .contains_key(crate::quota_pools::source_id(&q.account_id));
         }
     }
     TotalQuota {
@@ -246,7 +241,7 @@ pub fn calculate(
         estimated,
         percent: (known > 0).then_some(total),
         partial: known < accounts.len(),
-        weekly_scale_percent: base_ratio(platform) * 100.,
+        weekly_scale_percent: reference_ratio.map(|r| r * 100.).unwrap_or(0.),
     }
 }
 
@@ -255,23 +250,36 @@ mod tests {
     use super::*;
     use chrono::Duration;
     #[test]
-    fn ratio_policy_distinguishes_pools_and_respects_custom_overrides() {
-        let mut q = AccountQuota::empty("a::pool:claude");
+    fn unlearned_totals_use_raw_balances_then_switch_to_learned_conversion() {
+        let now = Utc::now();
         let mut display = DisplaySettings::default();
-        assert_eq!(weekly_ratio("antigravity", &q, &display), Some(0.5));
+        display.quota_provider = "chatgpt".into();
+        let accounts = [account("a", "codex"), account("b", "codex")];
+        let mut q = quota("a", Some(60.), 10., now);
+        q.five_hour_weekly_ratio = None;
+        let mut week = quota("b", None, 30., now);
+        week.five_hour_weekly_ratio = None;
+        let raw = calculate(&accounts, &[q.clone(), week], now, &display);
+        assert_eq!(raw.percent, Some(90.));
+        assert!(!raw.partial);
+        assert_eq!(raw.weekly_scale_percent, 0.);
+        q.five_hour_weekly_ratio = Some(0.5);
+        assert_eq!(calculate(&accounts[..1], &[q.clone()], now, &display).percent, Some(20.));
+        q.five_hour_weekly_ratio = None;
+        q = quota("a", Some(60.), 0., now);
+        q.five_hour_weekly_ratio = None;
+        assert_eq!(calculate(&accounts[..1], &[q], now, &display).percent, Some(0.));
+    }
+
+    #[test]
+    fn ratios_never_come_from_plan_or_custom_settings() {
+        let mut q = AccountQuota::empty("a::pool:claude");
         q.plan_type = Some("pro".into());
-        assert_eq!(weekly_ratio("antigravity", &q, &display), Some(0.5));
-        q.account_id = "a::pool:gemini3".into();
-        assert_eq!(weekly_ratio("antigravity", &q, &display), Some(0.25));
-        display
-            .quota_profiles
-            .insert("a".into(), "custom:2:30".into());
-        assert_eq!(weekly_ratio("antigravity", &q, &display), Some(0.3));
-        q.account_id = "a::pool:claude".into();
-        assert_eq!(weekly_ratio("antigravity", &q, &display), Some(0.3));
-        q.account_id = "b".into();
-        q.plan_type = Some("plus".into());
-        assert_eq!(weekly_ratio("codex_usage", &q, &display), Some(0.15));
+        assert_eq!(weekly_ratio(&q), None);
+        q.five_hour_weekly_ratio = Some(0.37);
+        assert_eq!(weekly_ratio(&q), Some(0.37));
+        assert_eq!(custom("custom:2:50"), Some(2.));
+        assert_eq!(custom("custom:2"), Some(2.));
     }
     #[test]
     fn retained_pool_keeps_total_but_not_current_account_eligibility() {
@@ -338,6 +346,7 @@ mod tests {
     }
     fn account(id: &str, p: &str) -> AccountSummary {
         AccountSummary {
+            pools: vec![],
             id: id.into(),
             provider_id: p.into(),
             display_name: id.into(),
@@ -369,6 +378,7 @@ mod tests {
 
     fn quota(id: &str, five: Option<f64>, week: f64, now: DateTime<Utc>) -> AccountQuota {
         let mut q = AccountQuota::empty(id);
+        q.five_hour_weekly_ratio = Some(0.15); // Synthetic calibrated observation.
         q.origin = "network".into();
         q.freshness = "fresh".into();
         q.status = "ok".into();
@@ -477,6 +487,11 @@ mod tests {
         for (plan, expected) in [("pro", 40.), ("max5x", 300.), ("max20x", 600.)] {
             let mut q = quota("a", Some(80.), 6., now);
             q.plan_type = Some(plan.into());
+            q.five_hour_weekly_ratio = Some(match plan {
+                "max5x" => 0.1,
+                "max20x" => 0.2,
+                _ => 0.15,
+            });
             assert!((calculate(&a, &[q], now, &display).percent.unwrap() - expected).abs() < 1e-8);
         }
     }
@@ -507,6 +522,7 @@ mod tests {
         let mut display = DisplaySettings::default();
         display.quota_provider = "antigravity".into();
         let mut q = quota("g", Some(80.), 10., now);
+        q.five_hour_weekly_ratio = Some(0.25);
         for w in &mut q.windows {
             w.scope = "feature:gemini".into();
         }

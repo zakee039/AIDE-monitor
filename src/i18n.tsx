@@ -3,6 +3,9 @@ import { cloneElement, isValidElement, type ReactNode } from "react";
 let language = "en";
 export function setLanguage(locale: string) { language = locale; }
 const en: Record<string, string> = {
+  "主额度": "Main quota",
+  "按实际消耗自动校准；估计值不替代服务端额度": "Calibrated from actual consumption; estimates do not replace measured quotas",
+  "所有额度池的 5h／7d 比例根据实际消耗自动学习，每次刷新验证。样本不足时显示原始额度；少量异常保留可靠估计，持续偏离后重新学习。": "All pool ratios are learned from consumption and checked on refresh. Raw quotas are shown while learning; isolated outliers retain the estimate, sustained changes trigger relearning.",
   "每个额度池单独展示；刷新失败时保留历史值并淡化。": "Each pool is shown separately. Previous values are retained and dimmed when refresh fails.",
   "5h 显示为折算后的周额度，并以剩余周额度为上限。比例为本地估算，可自定义；Grok 仅显示服务端返回的周或月额度。": "5h balances are expressed as a share of the weekly allowance, capped by the remaining weekly balance. Ratios are adjustable local estimates. Grok shows its reported weekly or monthly quota only.",
   "历史额度及倒计时以半透明显示，成功取得新数据后恢复。": "Historical balances and countdowns are dimmed until fresh data is received.",

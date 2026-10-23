@@ -43,6 +43,8 @@ pub struct ApiResult<T> {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountSummary {
+    #[serde(default)]
+    pub pools: Vec<PoolOption>,
     pub id: String,
     pub display_name: String,
     #[serde(default)]
@@ -53,6 +55,13 @@ pub struct AccountSummary {
     pub selected: bool,
     pub order: u64,
     pub support: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PoolOption {
+    pub id: String,
+    pub label: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -76,6 +85,8 @@ pub struct QuotaWindow {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountQuota {
+    #[serde(default)]
+    pub calibration: Option<RatioCalibration>,
     #[serde(default)]
     pub five_hour_weekly_ratio: Option<f64>,
     #[serde(default)]
@@ -101,6 +112,7 @@ impl AccountQuota {
     /// First use must not manufacture a successful network sample.
     pub fn empty(account_id: impl Into<String>) -> Self {
         Self {
+            calibration: None,
             five_hour_weekly_ratio: None,
             account_id: account_id.into(),
             plan_type: None,
@@ -119,6 +131,15 @@ impl AccountQuota {
             error: None,
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RatioCalibration {
+    pub state: String,
+    pub samples: usize,
+    pub ratio: Option<f64>,
+    pub validated_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -205,7 +226,7 @@ impl Default for TotalQuota {
             estimated: false,
             percent: None,
             partial: false,
-            weekly_scale_percent: 15.0,
+            weekly_scale_percent: 0.0,
         }
     }
 }
@@ -309,6 +330,8 @@ pub struct Settings {
     #[serde(default)]
     pub account_pools: BTreeMap<String, Vec<String>>,
     #[serde(default)]
+    pub pool_aliases: BTreeMap<String, String>,
+    #[serde(default)]
     pub proxies: Vec<ProxyProfile>,
     #[serde(default)]
     pub account_proxies: BTreeMap<String, String>,
@@ -335,6 +358,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             account_pools: BTreeMap::new(),
+            pool_aliases: BTreeMap::new(),
             proxies: vec![],
             account_proxies: BTreeMap::new(),
             account_refresh: BTreeMap::new(),
@@ -377,6 +401,7 @@ pub struct SettingsPatch {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AccountSelectionPatch {
     pub account_pools: Option<BTreeMap<String, Vec<String>>>,
+    pub pool_aliases: Option<BTreeMap<String, String>>,
     pub expected_revision: u64,
     pub account_ids: Vec<String>,
     pub aliases: Option<BTreeMap<String, String>>,

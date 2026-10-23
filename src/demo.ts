@@ -54,7 +54,7 @@ export function demoSubscribe(listener: (event: HudEvent) => void): () => void {
 }
 
 export function demoSnapshot(): Snapshot {
-  let selected = accounts.filter(account => account.selected).sort((a, b) => a.order - b.order).map((account, index) => ({ ...account, displayName: settings.display.privacyMode ? `${settings.display.locale === "zh-CN" ? "账号" : "Account"} ${index + 1}` : account.displayName }));
+  let selected = accounts.filter(account => account.selected).sort((a, b) => a.order - b.order).map((account, index) => ({ ...account, displayName: settings.display.privacyMode ? `${settings.display.locale === "zh-CN" ? "账号" : "Account"} ${index + 1}` : account.alias ?? account.displayName }));
   let quotas: AccountQuota[] = selected.map(account => {
     const originalIndex = accounts.findIndex(item => item.id === account.id);
     const old = account.id === "demo-work";
@@ -131,7 +131,7 @@ export function demoSnapshot(): Snapshot {
     if (!poolOptions(account.providerId).length) { poolAccounts.push(account); poolQuotas.push(q); continue; }
     for (const pool of selectedPools(account, settings.accountPools ?? {})) {
       const id = `${account.id}::pool:${pool}`;
-      poolAccounts.push({ ...account, id, displayName: `${account.displayName}-${pool}` });
+      poolAccounts.push({ ...account, id, displayName: `${account.displayName}-${settings.poolAliases?.[id] || pool}` });
       const scope = pool === "gemini3" ? "feature:gemini" : pool === "claude" ? "feature:claude" : pool === "gemini4" ? "feature:gemini4" : "base";
       let windows = q.windows.filter(w => w.scope === scope).map(w => ({ ...w, scope: "base" as const }));
       if (!windows.length) windows = [{ ...q.windows[0], id: `${pool}-weekly`, scope: "base", remainingPercent: null, measurement: "unknown", exhausted: null, resetsAt: null, durationSeconds: pool === "gemini4" ? 604800 : null }];
@@ -149,12 +149,14 @@ export function demoSnapshot(): Snapshot {
     }));
     if (i === 3) q.windows.shift();
   });
-  for (const quota of quotas) {
-    const account = selected.find(a => a.id === quota.accountId)!;
-    const profile = settings.display.quotaProfiles?.[account.id.split("::pool:")[0]] ?? "";
-    quota.fiveHourWeeklyRatio = profile.startsWith("custom:") ? +profile.split(":")[2] / 100
-      : account.id.endsWith("::pool:claude") ? 0.5 : account.providerId === "antigravity" ? 0.25
-      : profile === "max5x" ? 0.1 : profile === "max20x" ? 0.2 : 0.15;
+  // Synthetic calibration fixtures only; no platform-based ratio defaults.
+  for (const [index, quota] of quotas.entries()) {
+    const paired = quota.windows.some(w => w.durationSeconds === 18000) && quota.windows.some(w => w.durationSeconds === 604800);
+    if (paired) {
+      const ratio = scenario === "quota-review" && index === 0 ? null : .18;
+      quota.fiveHourWeeklyRatio = ratio;
+      quota.calibration = { state: ratio == null ? "learning" : index === 2 ? "retained" : "calibrated", samples: ratio == null ? 1 : 5, ratio, validatedAt: ratio == null ? null : new Date(baseTime).toISOString() };
+    }
   }
   const availability: Snapshot["availability"] = quotas.map(quota => {
     if (quota.freshness !== "fresh" || quota.origin !== "network" || !quota.baseCoverageComplete) return { accountId: quota.accountId, state: "unknown", reason: "stale", estimatedAvailableAt: null };
@@ -167,7 +169,7 @@ export function demoSnapshot(): Snapshot {
   const totalFor = (providerId: string): NonNullable<Snapshot["totalQuota"]> => {
   const own = selected.filter(a => quotaProvider(a.providerId) === providerId);
   const ownQuotas = quotas.filter(q => own.some(a => a.id === q.accountId));
-  const baseRatio = providerId === "antigravity" ? 0.25 : 0.15;
+  const baseRatio = ownQuotas.find(q => q.fiveHourWeeklyRatio != null)?.fiveHourWeeklyRatio ?? null;
   const hasFive = ownQuotas.some(q => q.windows.some(w => w.durationSeconds === 18000));
   const contributions = ownQuotas.flatMap(quota => {
     if (availability.find(item => item.accountId === quota.accountId)?.state === "unknown") return [];
@@ -177,13 +179,13 @@ export function demoSnapshot(): Snapshot {
     const profile = settings.display.quotaProfiles?.[quota.accountId.split("::pool:")[0]] ?? "";
     const custom = profile.split(":");
     const multiplier = profile.startsWith("custom:") ? +custom[1] : ({ pro5x: 5, pro10x: 10, pro20x: 20, max5x: 5, max20x: 20, ultra5x: 5 } as Record<string, number>)[profile] ?? 1;
-    const ratio = quota.fiveHourWeeklyRatio ?? baseRatio;
-    return week == null ? [] : [five == null ? week * multiplier / (hasFive ? baseRatio : 1) : five < 5 || week < 2 ? 0 : multiplier * Math.min(five, week / ratio)];
+    const ratio = quota.fiveHourWeeklyRatio;
+    return week == null ? [] : [five == null ? week * multiplier / (hasFive ? baseRatio ?? 1 : 1) : five < 5 || week < 2 ? 0 : multiplier * (ratio == null ? five : Math.min(five, week / ratio))];
   });
   const ownAvailable = own.find(a => availability.some(v => v.accountId === a.id && v.state === "now"));
   const ownWaiting = availability.filter(v => own.some(a => a.id === v.accountId) && v.state === "waiting").sort((a,b) => Date.parse(a.estimatedAvailableAt!) - Date.parse(b.estimatedAvailableAt!))[0];
   const ownRecommendation: Snapshot["recommendation"] = { state: ownAvailable ? "now" : ownWaiting ? "waiting" : own.length ? "unknown" : "empty", accountId: ownAvailable?.id ?? ownWaiting?.accountId ?? null, estimatedAvailableAt: ownAvailable ? null : ownWaiting?.estimatedAvailableAt ?? null, reason: "provider_quota", coverage: { selected: own.length, known: contributions.length, unknown: own.length - contributions.length, complete: own.length === contributions.length } };
-    return { percent: contributions.length ? contributions.reduce((a, b) => a + b, 0) : null, partial: scenario === "orb-partial" || contributions.length < own.length, weeklyScalePercent: baseRatio * 100, providerId, recommendation: ownRecommendation, estimated: true };
+    return { percent: contributions.length ? contributions.reduce((a, b) => a + b, 0) : null, partial: scenario === "orb-partial" || contributions.length < own.length, weeklyScalePercent: (baseRatio ?? 0) * 100, providerId, recommendation: ownRecommendation, estimated: true };
   };
   const totalQuota = totalFor(providerId);
   return {
@@ -204,7 +206,7 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
   let response: ApiResult<unknown>;
   if (["settings.update", "accounts.selection.update"].includes(method) && request.expectedRevision !== settings.settingsRevision) return fail("CONFLICT", "设置已更新，请重试。") as ApiResult<MethodMap[M]["result"]>;
   switch (method) {
-    case "capabilities.get": response = result({ appVersion: "0.7.0", apiVersion: "1.0", transport: "tauri", enabledMethods: methods, grantedScopes: ["quota.read", "quota.refresh", "events.read", "settings.read", "settings.write", "themes.read", "themes.write", "window.control", "diagnostics.read"], themeSchemaVersions: [1], providerIds: ["codex"], maxRefreshAccounts: 100 }); break;
+    case "capabilities.get": response = result({ appVersion: "0.7.3", apiVersion: "1.0", transport: "tauri", enabledMethods: methods, grantedScopes: ["quota.read", "quota.refresh", "events.read", "settings.read", "settings.write", "themes.read", "themes.write", "window.control", "diagnostics.read"], themeSchemaVersions: [1], providerIds: ["codex"], maxRefreshAccounts: 100 }); break;
     case "accounts.list": response = result(accounts.map((account, index) => ({ ...account, displayName: settings.display.privacyMode ? `${settings.display.locale === "zh-CN" ? "账号" : "Account"} ${index + 1}` : account.displayName }))); break;
     case "quota.snapshot.get": response = result(demoSnapshot()); break;
     case "recommendation.get": response = result(demoSnapshot().recommendation); break;
@@ -217,7 +219,7 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
       const ids = request.accountIds as string[];
       if (!Array.isArray(ids) || new Set(ids).size !== ids.length || ids.some(id => !accounts.some(account => account.id === id))) { response = fail("INVALID_ARGUMENT", "账号选择无效。"); break; }
       accounts = accounts.map(account => ({ ...account, selected: ids.includes(account.id), order: ids.indexOf(account.id) >= 0 ? ids.indexOf(account.id) : accounts.length }));
-      settings = { ...settings, ...(request.accountPools ? { accountPools: request.accountPools as Record<string, string[]> } : {}), display: { ...settings.display, quotaProvider: selectedQuotaProvider(settings, accounts) }, settingsRevision: settings.settingsRevision + 1 };
+      settings = { ...settings, ...(request.poolAliases ? { poolAliases: request.poolAliases as Record<string, string> } : {}), ...(request.accountPools ? { accountPools: request.accountPools as Record<string, string[]> } : {}), display: { ...settings.display, quotaProvider: selectedQuotaProvider(settings, accounts) }, settingsRevision: settings.settingsRevision + 1 };
       emit("settings.changed"); emit("snapshot.changed"); response = result(settings); break;
     }
     case "refresh.request": {
@@ -242,11 +244,11 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
       const { accountId, alias } = params as MethodMap["accounts.alias.update"]["params"];
       const account = accounts.find(a => a.id === accountId);
       if (!account || alias.length > 80) return fail("INVALID_ARGUMENT", "Invalid display name") as ApiResult<MethodMap[M]["result"]>;
-      account.alias = alias.trim() || null; account.displayName = account.alias ?? account.id.replace("demo-", "");
+      account.alias = alias.trim() || null;
       settings.settingsRevision++; emit("snapshot.changed"); response = result(settings); break;
     }
     case "window.control": response = result({ accepted: true }); break;
-    case "diagnostics.get": response = result({ appVersion: "0.7.0", adapterVersion: "演示", source, selectedAccountCount: accounts.filter(account => account.selected).length, activeJobCount: refreshing ? 1 : 0, recentErrorCodes: [] }); break;
+    case "diagnostics.get": response = result({ appVersion: "0.7.3", adapterVersion: "演示", source, selectedAccountCount: accounts.filter(account => account.selected).length, activeJobCount: refreshing ? 1 : 0, recentErrorCodes: [] }); break;
     default: response = fail("INVALID_ARGUMENT", "此功能尚未提供。");
   }
   return response as ApiResult<MethodMap[M]["result"]>;

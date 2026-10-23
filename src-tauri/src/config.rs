@@ -10,6 +10,8 @@ use std::{
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Config {
+    pub ratio_learning: HashMap<String, crate::quota_learning::Learner>,
+    pub discovered_pools: HashMap<String, Vec<crate::model::PoolOption>>,
     pub config_version: u32,
     pub settings: Settings,
     pub sources: Vec<crate::adapters::sources::SourceOption>,
@@ -22,6 +24,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            ratio_learning: HashMap::new(),
+            discovered_pools: HashMap::new(),
             config_version: 1,
             settings: Settings::default(),
             source_path: None,
@@ -39,7 +43,7 @@ pub fn load(path: &Path) -> Result<Config, ApiError> {
         return Ok(Config::default());
     }
     let bytes = fs::read(path).map_err(|_| ApiError::new("IO_ERROR", "无法读取 HUD 设置"))?;
-    if bytes.len() > 1024 * 1024 {
+    if bytes.len() > 64 * 1024 * 1024 {
         return Err(ApiError::new("IO_ERROR", "HUD 设置文件过大"));
     }
     let mut config: Config = serde_json::from_slice(&bytes)
@@ -59,6 +63,30 @@ pub fn load(path: &Path) -> Result<Config, ApiError> {
         config.settings.usb_display.theme_id = "usb-mint".into();
     }
     Ok(config)
+}
+
+impl Config {
+    /// Bound persisted evidence across accounts without discarding learned ratios.
+    pub fn bound_learning_history(&mut self) {
+        let mut count: usize = self.ratio_learning.values().map(|l| l.sample_count()).sum();
+        if count <= 100_000 {
+            return;
+        }
+        let mut oldest: Vec<_> = self
+            .ratio_learning
+            .iter()
+            .map(|(key, l)| (key.clone(), l.last_observed()))
+            .collect();
+        oldest.sort_by_key(|(_, at)| *at);
+        for (key, _) in oldest {
+            if count <= 100_000 {
+                break;
+            }
+            let learner = self.ratio_learning.get_mut(&key).unwrap();
+            count -= learner.sample_count();
+            learner.discard_history();
+        }
+    }
 }
 
 pub fn atomic_json(path: &Path, value: &impl Serialize) -> Result<(), ApiError> {
@@ -81,6 +109,25 @@ pub fn atomic_json(path: &Path, value: &impl Serialize) -> Result<(), ApiError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn previous_version_settings_load_without_learning_or_pool_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut old = serde_json::to_value(Config::default()).unwrap();
+        old.as_object_mut().unwrap().remove("ratioLearning");
+        old.as_object_mut().unwrap().remove("discoveredPools");
+        old["settings"].as_object_mut().unwrap().remove("poolAliases");
+        old["aliases"] = serde_json::json!({"a":"Existing alias"});
+        old["selectedIds"] = serde_json::json!(["a"]);
+        atomic_json(&path, &old).unwrap();
+        let before = fs::read(&path).unwrap();
+        let loaded = load(&path).unwrap();
+        assert!(loaded.ratio_learning.is_empty());
+        assert!(loaded.settings.pool_aliases.is_empty());
+        assert_eq!(loaded.aliases["a"], "Existing alias");
+        assert_eq!(loaded.selected_ids, ["a"]);
+        assert_eq!(fs::read(&path).unwrap(), before);
+    }
     #[test]
     fn config_round_trip_and_overwrite_are_atomic() {
         let dir = tempfile::tempdir().unwrap();

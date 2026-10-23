@@ -16,9 +16,9 @@ export function selectedQuotaProvider(settings: Settings, accounts: AccountSumma
   return available.find(p => p.id === settings.display.quotaProvider)?.id ?? available[0]?.id ?? "";
 }
 const profiles: Record<string, [string, string][]> = {
-  chatgpt: [["plus", "Plus / Team / Business · 1× · 15%"], ["pro5x", "Pro 5× · 15%"], ["pro10x", "Pro 10× · 15%"], ["pro20x", "Pro 20× · 15%"]],
-  claude: [["pro", "Pro · 1× · 15%"], ["max5x", "Max 5× · 10%"], ["max20x", "Max 20× · 20%"]],
-  antigravity: [["pro", "Google AI Pro · 1× · Gemini 25% / Claude 50%"], ["ultra5x", "Google AI Ultra 5× · Gemini 25% / Claude 50%"]],
+  chatgpt: [["plus", "Plus / Team / Business · 1×"], ["pro5x", "Pro 5×"], ["pro10x", "Pro 10×"], ["pro20x", "Pro 20×"]],
+  claude: [["pro", "Pro · 1×"], ["max5x", "Max 5×"], ["max20x", "Max 20×"]],
+  antigravity: [["pro", "Google AI Pro · 1×"], ["ultra5x", "Google AI Ultra 5×"]],
   grok: [["supergrok", "SuperGrok · 1×"]],
 };
 
@@ -41,7 +41,7 @@ export function QuotaSettings({ settings, accounts, busy, onChange }: {
     <p className="quota-help">{t("只累计所选平台中已勾选的账号与额度池，沿用订阅档位估算。")}</p>
     <details className="quota-profile-settings"><summary>{t("订阅额度换算（估算）")}</summary>
       <p className="quota-help">{t("自动读取订阅；未返回订阅时暂按基础档估算，无法识别的档位不累计。可在此指定档位。")}</p>
-      <p className="quota-help">{t("5h 显示为折算后的周额度，并以剩余周额度为上限。比例为本地估算，可自定义；Grok 仅显示服务端返回的周或月额度。")}</p>
+      <p className="quota-help">{t("所有额度池的 5h／7d 比例根据实际消耗自动学习，每次刷新验证。样本不足时显示原始额度；少量异常保留可靠估计，持续偏离后重新学习。")}</p>
       <p className="quota-help">{t("历史额度及倒计时以半透明显示，成功取得新数据后恢复。")}</p>
       {accounts.filter(a => quotaProvider(a.providerId) === active).map(a => <ProfileRow key={a.id} account={a} value={settings.display.quotaProfiles?.[a.id] ?? ""} busy={busy} save={value => save(a.id, value)} />)}
     </details>
@@ -51,19 +51,18 @@ export function QuotaSettings({ settings, accounts, busy, onChange }: {
 function ProfileRow({ account, value, busy, save }: { account: AccountSummary; value: string; busy: boolean; save: (value: string) => void }) {
   const [custom, setCustom] = useState(value.startsWith("custom:"));
   const [multiplier, setMultiplier] = useState("1");
-  const [ratio, setRatio] = useState("15");
   useEffect(() => {
     setCustom(value.startsWith("custom:"));
     const parts = value.split(":");
-    setMultiplier(parts[1] ?? "1"); setRatio(parts[2] ?? (account.providerId === "antigravity" ? "25" : "15"));
+    setMultiplier(parts[1] ?? "1");
   }, [value, account.providerId]);
-  const valid = Number.isFinite(+multiplier) && +multiplier >= 0.01 && +multiplier <= 1000 && Number.isFinite(+ratio) && +ratio >= 0.01 && +ratio <= 100;
+  const valid = Number.isFinite(+multiplier) && +multiplier >= 0.01 && +multiplier <= 1000;
   return <div className="quota-profile-row">
     <label><span translate="no">{account.displayName}</span><select aria-label={`${t("订阅档位")} ${account.displayName}`} value={custom ? "custom" : value} disabled={busy} onChange={e => { setCustom(e.target.value === "custom"); if (e.target.value !== "custom") save(e.target.value); }}>
       <option value="">{t("自动（未返回订阅时按基础档）")}</option>
       {profiles[quotaProvider(account.providerId)]?.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
       <option value="custom">{t("自定义")}</option>
     </select></label>
-    {custom && <div className="quota-custom"><label>{t("额度倍率")}<input type="number" min="0.01" max="1000" step="any" value={multiplier} disabled={busy} onChange={e => setMultiplier(e.target.value)} /></label><label>{t("5h 对应周额度 (%)")}<input type="number" min="0.01" max="100" step="any" value={ratio} disabled={busy} onChange={e => setRatio(e.target.value)} /></label><button className="secondary-button" disabled={busy || !valid} onClick={() => save(`custom:${+multiplier}:${+ratio}`)}>{t("保存")}</button></div>}
+    {custom && <div className="quota-custom"><label>{t("额度倍率")}<input type="number" min="0.01" max="1000" step="any" value={multiplier} disabled={busy} onChange={e => setMultiplier(e.target.value)} /></label><button className="secondary-button" disabled={busy || !valid} onClick={() => save(`custom:${+multiplier}`)}>{t("保存")}</button></div>}
   </div>;
 }

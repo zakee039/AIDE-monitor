@@ -10,6 +10,7 @@ export function effectiveQuotaWindows(quota: AccountQuota | undefined): QuotaWin
     const ratio = quota.fiveHourWeeklyRatio;
     const hourly = window.measurement === "percent" ? window.remainingPercent : null;
     const weekly = week.measurement === "percent" ? week.remainingPercent : null;
+    if (ratio == null && weekly !== 0) return window; // Unknown pool: show raw windows without guessing capacity.
     const value = weekly === 0 ? 0 : hourly != null && weekly != null && ratio != null && Number.isFinite(ratio) && ratio > 0 && ratio <= 1
       ? Math.min(hourly, weekly / ratio) : null;
     return { ...window, remainingPercent: value, measurement: value == null ? "unknown" : "percent", exhausted: value == null ? null : value === 0, retainedAt: window.retainedAt ?? week.retainedAt };

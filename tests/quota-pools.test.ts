@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { displayCount, selectedPools, poolOptions } from "../src/quota-pools.ts";
+import { displayCount, selectedPools, poolOptions, accountPoolOptions } from "../src/quota-pools.ts";
 import { displayWindows } from "../src/monitor-display.ts";
 import type { AccountSummary, AccountQuota } from "../contracts/hud-api.ts";
 
@@ -19,4 +19,11 @@ test("monitor renders the chosen pool and does not invent an hourly slot for Arg
   assert.equal(windows.length, 1);
   assert.equal(windows[0].remainingPercent, 62);
   assert.equal(windows[0].durationSeconds, 604800);
+});
+
+test("server discovered pools drive selection and display count", () => {
+  const discovered = { ...google, pools: [{id:"gemini3", label:"Gemini 3"}, {id:"bucket-future", label:"Future model"}] };
+  assert.equal(accountPoolOptions(discovered)[1].label, "Future model");
+  assert.deepEqual(selectedPools(discovered, {g:["bucket-future"]}), ["bucket-future"]);
+  assert.equal(displayCount([discovered],["g"],{g:["gemini3","bucket-future"]}),2);
 });

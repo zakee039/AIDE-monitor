@@ -43,3 +43,12 @@ test("only historical measurements fade; a retained week also dims the derived 5
   raw.status = "ok"; raw.validUntil = at(-1);
   assert.ok(raw.windows.every(w => historicalWindow(raw, w, now)));
 });
+
+test("uncalibrated pools keep raw 5h while an exhausted week still gates to zero", () => {
+  const raw = quota(100, 100); raw.fiveHourWeeklyRatio = null;
+  assert.equal(effectiveQuotaWindows(raw)[0].remainingPercent, 100);
+  raw.windows[1].remainingPercent = 0;
+  assert.equal(effectiveQuotaWindows(raw)[0].remainingPercent, 0);
+  raw.fiveHourWeeklyRatio = .4; raw.windows[1].remainingPercent = 10;
+  assert.equal(effectiveQuotaWindows(raw)[0].remainingPercent, 25);
+});

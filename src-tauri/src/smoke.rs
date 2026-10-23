@@ -284,7 +284,7 @@ const SCRIPT: &str = r#"
     const snapshot = await call('aide_theme_data');
     assert(snapshot.accounts.length === 0 && snapshot.quotas.length === 0, 'ISOLATED_SNAPSHOT_NOT_EMPTY');
     assert(snapshot.source.state === 'ready', 'ISOLATED_SOURCE_NOT_READY');
-    assert(snapshot.totalQuota.percent === null && snapshot.totalQuota.partial === false && snapshot.totalQuota.weeklyScalePercent === 15, 'TOTAL_QUOTA_CONTRACT_MISMATCH');
+    assert(snapshot.totalQuota.percent === null && snapshot.totalQuota.partial === false && snapshot.totalQuota.weeklyScalePercent === 0, 'TOTAL_QUOTA_CONTRACT_MISMATCH');
     const themes = await call('aide_theme_builtins');
     assert(Array.isArray(themes) && themes.some(theme => theme.id === 'paper'), 'BUILT_IN_THEMES_MISSING');
     const theme = await call('aide_theme_builtin');

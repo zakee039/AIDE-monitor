@@ -13,13 +13,76 @@ pub fn options(provider: &str) -> &'static [&'static str] {
         _ => &[],
     }
 }
-pub fn scope(pool: &str) -> &'static str {
+pub fn scope(pool: &str) -> String {
     match pool {
-        "gemini3" => "feature:gemini",
-        "claude" => "feature:claude",
-        "gemini4" => "feature:gemini4",
-        _ => "base",
+        "gemini3" => "feature:gemini".into(),
+        "shared" | "base" => "base".into(),
+        _ => format!("feature:{pool}"),
     }
+}
+pub fn catalog(provider: &str, windows: &[QuotaWindow], saved: &[PoolOption]) -> Vec<PoolOption> {
+    let mut result: Vec<_> = options(provider)
+        .iter()
+        .map(|id| PoolOption {
+            id: (*id).into(),
+            label: match *id {
+                "gemini3" => "Gemini 3",
+                "claude" => "Claude",
+                "gemini4" => "Gemini 4",
+                "shared" => "共享额度",
+                _ => id,
+            }
+            .into(),
+        })
+        .collect();
+    for item in saved {
+        if !result.iter().any(|p| p.id == item.id) && result.len() < 100 {
+            result.push(item.clone());
+        }
+    }
+    for w in windows {
+        let Some(feature) = w.scope.strip_prefix("feature:") else {
+            continue;
+        };
+        let id = if provider == "antigravity" && feature == "gemini" {
+            "gemini3"
+        } else {
+            feature
+        };
+        if id.is_empty()
+            || id.len() > 160
+            || id.contains("::pool:")
+            || id.chars().any(char::is_control)
+        {
+            continue;
+        }
+        if result.iter().any(|p| p.id == id) || result.len() >= 100 {
+            continue;
+        }
+        result.push(PoolOption {
+            id: id.into(),
+            label: w
+                .label
+                .split(" · ")
+                .next()
+                .unwrap_or(id)
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(100)
+                .collect(),
+        });
+    }
+    if options(provider).is_empty() && !result.is_empty() && !result.iter().any(|p| p.id == "base")
+    {
+        result.insert(
+            0,
+            PoolOption {
+                id: "base".into(),
+                label: "主额度".into(),
+            },
+        );
+    }
+    result
 }
 pub fn tracks_window(
     provider: &str,
@@ -68,12 +131,20 @@ pub fn selected<'a>(
     choices
         .get(id)
         .map(|pools| pools.iter().map(String::as_str).collect())
-        .unwrap_or_else(|| options(provider).first().copied().into_iter().collect())
+        .unwrap_or_else(|| vec![options(provider).first().copied().unwrap_or("base")])
 }
 pub fn project(
     accounts: Vec<AccountSummary>,
     quotas: Vec<AccountQuota>,
     choices: &BTreeMap<String, Vec<String>>,
+) -> (Vec<AccountSummary>, Vec<AccountQuota>) {
+    project_named(accounts, quotas, choices, &BTreeMap::new())
+}
+pub fn project_named(
+    accounts: Vec<AccountSummary>,
+    quotas: Vec<AccountQuota>,
+    choices: &BTreeMap<String, Vec<String>>,
+    aliases: &BTreeMap<String, String>,
 ) -> (Vec<AccountSummary>, Vec<AccountQuota>) {
     let mut displayed = vec![];
     let mut samples = vec![];
@@ -83,18 +154,41 @@ pub fn project(
             .find(|q| q.account_id == account.id)
             .cloned()
             .unwrap_or_else(|| AccountQuota::empty(&account.id));
-        if options(&account.provider_id).is_empty() {
+        let pools = catalog(&account.provider_id, &quota.windows, &account.pools);
+        if pools.is_empty() {
             displayed.push(account);
             samples.push(quota);
             continue;
         }
         for pool in selected(&account.provider_id, &account.id, choices) {
-            if !options(&account.provider_id).contains(&pool) {
+            if !pools.iter().any(|p| p.id == pool) {
                 continue;
             }
             let mut entry = account.clone();
             entry.id = format!("{}{SEPARATOR}{pool}", account.id);
-            entry.display_name = format!("{}-{pool}", account.display_name);
+            entry.display_name = if pool == "base" {
+                account.display_name.clone()
+            } else {
+                format!(
+                    "{}-{}",
+                    account.display_name,
+                    if options(&account.provider_id).contains(&pool) {
+                        pool
+                    } else {
+                        pools
+                            .iter()
+                            .find(|p| p.id == pool)
+                            .map(|p| p.label.as_str())
+                            .unwrap_or(pool)
+                    }
+                )
+            };
+            if let Some(name) = aliases
+                .get(&entry.id)
+                .filter(|name| !name.trim().is_empty())
+            {
+                entry.display_name = format!("{}-{name}", account.display_name);
+            }
             entry.alias = None;
             let mut sample = quota.clone();
             sample.account_id = entry.id.clone();
@@ -151,6 +245,7 @@ mod tests {
 
     fn account() -> AccountSummary {
         AccountSummary {
+            pools: vec![],
             id: "a".into(),
             display_name: "name".into(),
             alias: None,
@@ -237,7 +332,14 @@ mod tests {
             "a".into(),
             vec!["gemini3".into(), "claude".into(), "gemini4".into()],
         )]);
-        let (accounts, quotas) = project(vec![account()], vec![q], &choices);
+        let (accounts, mut quotas) = project(vec![account()], vec![q], &choices);
+        for q in &mut quotas {
+            q.five_hour_weekly_ratio = Some(if q.account_id.ends_with("::pool:claude") {
+                0.5
+            } else {
+                0.25
+            });
+        }
         let mut display = DisplaySettings::default();
         display.quota_provider = "antigravity".into();
         let total = crate::quota_total::calculate(&accounts, &quotas, now, &display);
@@ -248,6 +350,37 @@ mod tests {
             .insert("a".into(), "custom:2:25".into());
         let total = crate::quota_total::calculate(&accounts, &quotas, now, &display);
         assert_eq!(total.percent, Some(700.));
-        assert!(!total.estimated);
+        assert!(total.estimated);
+    }
+
+    #[test]
+    fn discovered_pool_can_be_selected_and_retained_without_guessing_total() {
+        let now = Utc::now();
+        let q=crate::adapters::providers::parse(&json!({"groups":[{"buckets":[
+            {"bucketId":"future-5h","remainingFraction":0.8}, {"bucketId":"future-weekly","remainingFraction":0.9}
+        ]}]}),"antigravity","a",now).unwrap();
+        let mut a = account();
+        a.pools = catalog("antigravity", &q.windows, &[]);
+        let dynamic = a
+            .pools
+            .iter()
+            .find(|p| p.id.starts_with("bucket-"))
+            .unwrap()
+            .id
+            .clone();
+        let choices = BTreeMap::from([("a".into(), vec![dynamic.clone()])]);
+        let (accounts, mut quotas) = project(vec![a.clone()], vec![q], &choices);
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(quotas[0].windows.len(), 2);
+        quotas[0].five_hour_weekly_ratio = Some(0.4);
+        let mut display = DisplaySettings::default();
+        display.quota_provider = "antigravity".into();
+        let total = crate::quota_total::calculate(&accounts, &quotas, now, &display);
+        assert!(total.partial);
+        assert_eq!(total.percent, None);
+        let (restored, unknown) = project(vec![a.clone()], vec![], &choices);
+        assert_eq!(restored[0].id, accounts[0].id);
+        assert_eq!(unknown[0].windows[0].measurement, "unknown");
+        assert_eq!(catalog("antigravity", &[], &a.pools), a.pools);
     }
 }

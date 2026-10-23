@@ -34,7 +34,10 @@ export type ApiResult<T> = EnvelopeMeta & (
   | { ok: false; error: ApiError }
 );
 
+export interface PoolOption { id: string; label: string }
+
 export interface AccountSummary {
+  pools?: PoolOption[];
   alias?: string | null;
   isCurrent?: boolean;
   id: AccountId;
@@ -59,8 +62,11 @@ export interface QuotaWindow {
   resetsAt: UtcTime | null;
 }
 
+export interface RatioCalibration { state: "learning" | "calibrated" | "retained"; samples: number; ratio: number | null; validatedAt: UtcTime | null }
+
 export interface AccountQuota {
-  fiveHourWeeklyRatio?: number | null; // Local estimate shared with the total-quota policy.
+  calibration?: RatioCalibration | null;
+  fiveHourWeeklyRatio?: number | null; // Learned from paired consumption; absent until reliable samples exist.
   planType?: string | null;
   resetCreditsAvailable?: number | null; // Available manual resets; absent/invalid stays unknown.
   accountId: AccountId;
@@ -144,6 +150,7 @@ export interface UsbDisplaySettings { enabled: boolean; deviceId: string; themeI
 export interface ProxyProfile { id: string; name: string; address: string }
 export interface Settings {
   accountPools?: Record<string, string[]>;
+  poolAliases?: Record<string, string>;
   proxies: ProxyProfile[];
   accountProxies: Record<string, string>;
   accountRefresh: Record<string, number>;
@@ -166,6 +173,7 @@ export interface SettingsPatch {
 }
 export interface AccountSelectionPatch {
   accountPools?: Record<string, string[]>;
+  poolAliases?: Record<string, string>;
   expectedRevision: number;
   accountIds: AccountId[]; // physical IDs from accounts.list; unique ordered selection; full replacement
   aliases?: Record<AccountId, string>; // local presentation only

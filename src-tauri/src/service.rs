@@ -139,6 +139,35 @@ impl Service {
         service.rescan()?;
         Ok(service)
     }
+    fn observe_quota(&self, d: &mut Data, id: &str, quota: &AccountQuota) {
+        if let Some(account) = d.accounts.iter_mut().find(|a| a.summary.id == id) {
+            account.summary.pools = crate::quota_pools::catalog(
+                &account.summary.provider_id,
+                &quota.windows,
+                &account.summary.pools,
+            );
+            let summary = account.summary.clone();
+            d.config
+                .discovered_pools
+                .insert(id.into(), summary.pools.clone());
+            let choices = std::collections::BTreeMap::from([(
+                id.to_owned(),
+                summary.pools.iter().map(|p| p.id.clone()).collect(),
+            )]);
+            let (_, pools) =
+                crate::quota_pools::project(vec![summary], vec![quota.clone()], &choices);
+            for pool in pools {
+                d.config
+                    .ratio_learning
+                    .entry(crate::quota_learning::key(&pool.account_id).to_owned())
+                    .or_default()
+                    .observe(&pool);
+            }
+            // Preserve live data if disk is temporarily unavailable; try again next refresh.
+            d.config.bound_learning_history();
+            let _ = self.save(&d.config);
+        }
+    }
     pub fn envelope<T: Serialize>(&self, result: Result<T, ApiError>) -> ApiResult<T> {
         let revision = self.data.lock().map(|d| d.revision).unwrap_or(0);
         let (ok, data, error) = match result {
@@ -336,6 +365,15 @@ impl Service {
                         .unwrap_or_else(|| base_name.clone());
                     accounts.push(Entry {
                         summary: AccountSummary {
+                            pools: crate::quota_pools::catalog(
+                                &account.provider_id,
+                                &[],
+                                config
+                                    .discovered_pools
+                                    .get(&id)
+                                    .map(Vec::as_slice)
+                                    .unwrap_or(&[]),
+                            ),
                             id: id.clone(),
                             display_name,
                             alias: config.aliases.get(&id).cloned(),
@@ -354,6 +392,14 @@ impl Service {
                     .iter()
                     .map(|a| a.summary.id.clone())
                     .collect::<HashSet<_>>();
+                config.discovered_pools.retain(|id, _| known.contains(id));
+                config
+                    .ratio_learning
+                    .retain(|id, _| known.contains(crate::quota_pools::source_id(id)));
+                config
+                    .settings
+                    .pool_aliases
+                    .retain(|id, _| known.contains(crate::quota_pools::source_id(id)));
                 config.selected_ids.retain(|id| known.contains(id));
                 config
                     .settings
@@ -565,14 +611,37 @@ impl Service {
                 result
             })
             .collect::<Vec<_>>();
-        let (accounts, mut quotas) =
-            crate::quota_pools::project(accounts, quotas, &d.config.settings.account_pools);
-        for (account, quota) in accounts.iter().zip(&mut quotas) {
-            quota.five_hour_weekly_ratio = crate::quota_total::weekly_ratio(
-                &account.provider_id,
-                quota,
-                &d.config.settings.display,
-            );
+        let (accounts, mut quotas) = crate::quota_pools::project_named(
+            accounts,
+            quotas,
+            &d.config.settings.account_pools,
+            &d.config.settings.pool_aliases,
+        );
+        for quota in &mut quotas {
+            let paired = quota
+                .windows
+                .iter()
+                .any(|w| w.duration_seconds == Some(18000))
+                && quota
+                    .windows
+                    .iter()
+                    .any(|w| w.duration_seconds == Some(604800));
+            if paired {
+                let mut estimate = d
+                    .config
+                    .ratio_learning
+                    .get(crate::quota_learning::key(&quota.account_id))
+                    .cloned()
+                    .unwrap_or_default()
+                    .estimate(now);
+                if quota.error.is_some() || quota.freshness != "fresh" {
+                    if estimate.ratio.is_some() {
+                        estimate.state = "retained".into();
+                    }
+                }
+                quota.five_hour_weekly_ratio = estimate.ratio;
+                quota.calibration = Some(estimate);
+            }
         }
         let availability = quotas
             .iter()
@@ -643,7 +712,11 @@ impl Service {
                     .accounts
                     .iter()
                     .filter(|a| all || a.summary.selected)
-                    .map(|a| a.summary.clone())
+                    .map(|a| {
+                        let mut summary = a.summary.clone();
+                        summary.display_name = a.base_name.clone();
+                        summary
+                    })
                     .collect::<Vec<_>>();
                 values.sort_by_key(|a| a.order);
                 if d.config.settings.display.privacy_mode {
@@ -714,21 +787,56 @@ impl Service {
                     .iter()
                     .find(|a| &a.summary.id == id)
                     .ok_or_else(|| ApiError::new("INVALID_ARGUMENT", "额度池账号不存在"))?;
-                let allowed = crate::quota_pools::options(&account.summary.provider_id);
+                let allowed = crate::quota_pools::catalog(
+                    &account.summary.provider_id,
+                    &[],
+                    &account.summary.pools,
+                );
                 if allowed.is_empty()
                     || choices.len() > allowed.len()
                     || choices.iter().collect::<HashSet<_>>().len() != choices.len()
-                    || choices.iter().any(|p| !allowed.contains(&p.as_str()))
+                    || choices
+                        .iter()
+                        .any(|p| !allowed.iter().any(|item| item.id == *p))
                 {
                     return Err(ApiError::new("INVALID_ARGUMENT", "额度池选择无效"));
                 }
             }
             config.settings.account_pools = pools;
         }
+        if let Some(aliases) = patch.pool_aliases {
+            for (id, alias) in &aliases {
+                let Some((source, pool)) = id.split_once("::pool:") else {
+                    return Err(ApiError::new("INVALID_ARGUMENT", "额度池名称无效"));
+                };
+                let valid_pool = d
+                    .accounts
+                    .iter()
+                    .find(|a| a.summary.id == source)
+                    .is_some_and(|a| {
+                        crate::quota_pools::catalog(&a.summary.provider_id, &[], &a.summary.pools)
+                            .iter()
+                            .any(|p| p.id == pool)
+                    });
+                if !valid_pool || alias.chars().count() > 80 || alias.chars().any(char::is_control)
+                {
+                    return Err(ApiError::new("INVALID_ARGUMENT", "额度池名称无效"));
+                }
+            }
+            config.settings.pool_aliases = aliases
+                .into_iter()
+                .filter_map(|(id, alias)| {
+                    let name = alias.trim();
+                    (!name.is_empty()).then(|| (id, name.to_owned()))
+                })
+                .collect();
+        }
         let mut display_count = 0;
         for id in &config.selected_ids {
             let account = d.accounts.iter().find(|a| &a.summary.id == id).unwrap();
-            let count = if crate::quota_pools::options(&account.summary.provider_id).is_empty() {
+            let count = if account.summary.pools.is_empty()
+                && crate::quota_pools::options(&account.summary.provider_id).is_empty()
+            {
                 1
             } else {
                 crate::quota_pools::selected(
@@ -1265,6 +1373,7 @@ impl Service {
                     .account_interval(&id)
                     .unwrap_or(d.config.settings.refresh_interval_seconds);
                 domain::update_freshness(&mut quota, now, interval);
+                self.observe_quota(&mut d, &id, &quota);
                 if let Some(previous) = d.quotas.get(&id) {
                     crate::quota_history::retain_missing(&mut quota, previous);
                 }
@@ -1277,6 +1386,12 @@ impl Service {
                 }
             }
             Err(error) => {
+                for (key, learner) in d.config.ratio_learning.iter_mut() {
+                    if crate::quota_pools::source_id(key) == id {
+                        learner.observe(&AccountQuota::empty(key));
+                    }
+                }
+                let _ = self.save(&d.config);
                 let count = d.failures.entry(id.clone()).or_default();
                 *count += 1;
                 let seconds = 30_u64
@@ -1682,6 +1797,7 @@ mod tests {
         assert!(service
             .select_accounts(AccountSelectionPatch {
                 account_pools: None,
+                pool_aliases: None,
                 expected_revision: 0,
                 account_ids: vec!["missing".into()],
                 aliases: None
@@ -1744,6 +1860,7 @@ mod tests {
         service
             .select_accounts(AccountSelectionPatch {
                 account_pools: None,
+                pool_aliases: None,
                 expected_revision: service.settings().settings_revision,
                 account_ids: vec![id.clone()],
                 aliases: None,
@@ -1798,6 +1915,104 @@ mod tests {
             .display_name
             .ends_with("-claude"));
         assert_eq!(service.accounts(true).len(), 1);
+    }
+
+    #[test]
+    fn pool_names_persist_without_replacing_source_account_name_or_pool_ids() {
+        let (_dir, service, id) = synthetic_service();
+        {
+            let mut d = service.data.lock().unwrap();
+            d.accounts[0].summary.provider_id = "antigravity".into();
+            d.accounts[0].summary.pools = crate::quota_pools::catalog("antigravity", &[], &[]);
+        }
+        let pool_id = format!("{id}::pool:claude");
+        let settings = service.select_accounts(serde_json::from_value(json!({
+            "expectedRevision":service.settings().settings_revision,"accountIds":[id.clone()],
+            "accountPools":{id.clone():["claude"]},"aliases":{id.clone():"My account"},
+            "poolAliases":{pool_id.clone():"My model"}
+        })).unwrap()).unwrap();
+        let reply = service.read_reply("accounts", true).data.unwrap();
+        assert_eq!(reply[0]["displayName"], "synthetic-name");
+        assert_eq!(reply[0]["alias"], "My account");
+        let snapshot = service.snapshot();
+        assert_eq!(snapshot.accounts[0].display_name, "My account-My model");
+        assert_eq!(snapshot.accounts[0].id, pool_id);
+        assert_eq!(snapshot.quotas[0].account_id, pool_id);
+        assert_eq!(
+            crate::config::load(&service.config_path)
+                .unwrap()
+                .settings
+                .pool_aliases[&pool_id],
+            "My model"
+        );
+        assert!(service
+            .select_accounts(
+                serde_json::from_value(json!({
+                    "expectedRevision":settings.settings_revision,"accountIds":[id.clone()],
+                    "poolAliases":{format!("{id}::pool:invented"):"Invalid"}
+                }))
+                .unwrap()
+            )
+            .is_err());
+        assert_eq!(
+            service.settings().settings_revision,
+            settings.settings_revision
+        );
+        service.select_accounts(serde_json::from_value(json!({
+            "expectedRevision":settings.settings_revision,"accountIds":[id],"poolAliases":{pool_id:"  "}
+        })).unwrap()).unwrap();
+        assert_eq!(
+            service.snapshot().accounts[0].display_name,
+            "My account-claude"
+        );
+    }
+
+    #[test]
+    fn discovery_and_learning_persist_and_unknown_selection_is_validated() {
+        let (_dir, service, id) = synthetic_service();
+        let now = Utc::now();
+        for i in 0..4 {
+            let q = crate::adapters::providers::parse(
+                &json!({"five_hour_future":{
+                    "utilization":10+i*20, "resets_at":(now+chrono::Duration::hours(5)).to_rfc3339()
+                },"seven_day_future":{
+                    "utilization":10+i*4,"resets_at":(now+chrono::Duration::days(7)).to_rfc3339()
+                }}),
+                "claude",
+                &id,
+                now - chrono::Duration::seconds((3 - i) * 300),
+            )
+            .unwrap();
+            let mut d = service.data.lock().unwrap();
+            service.observe_quota(&mut d, &id, &q);
+            d.quotas.insert(id.clone(), q);
+        }
+        let pools = service.accounts(true)[0].pools.clone();
+        let pool = pools
+            .iter()
+            .find(|p| p.id.starts_with("bucket-"))
+            .unwrap()
+            .id
+            .clone();
+        let settings=service.select_accounts(serde_json::from_value(json!({
+            "expectedRevision":service.settings().settings_revision,"accountIds":[id.clone()],"accountPools":{id.clone():[pool.clone()]}
+        })).unwrap()).unwrap();
+        let snapshot = service.snapshot();
+        assert_eq!(snapshot.quotas[0].five_hour_weekly_ratio, Some(0.2));
+        assert!(snapshot.total_quota.partial);
+        let saved = crate::config::load(&service.config_path).unwrap();
+        assert_eq!(saved.discovered_pools[&id], pools);
+        assert_eq!(
+            saved.ratio_learning[&format!("{id}::pool:{pool}")]
+                .estimate(now)
+                .ratio,
+            Some(0.2)
+        );
+        let reopened = Service::new(service.config_path.parent().unwrap().into(), None).unwrap();
+        assert_eq!(reopened.accounts(true)[0].pools, pools);
+        assert!(reopened.select_accounts(serde_json::from_value(json!({
+            "expectedRevision":settings.settings_revision,"accountIds":[id.clone()],"accountPools":{id:["made-up-pool"]}
+        })).unwrap()).is_err());
     }
 
     #[test]
@@ -2168,6 +2383,7 @@ mod tests {
             service
                 .select_accounts(AccountSelectionPatch {
                     account_pools: None,
+                    pool_aliases: None,
                     expected_revision: service.settings().settings_revision,
                     account_ids: ids,
                     aliases: None,

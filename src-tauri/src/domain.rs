@@ -1,7 +1,6 @@
 //! Quota decisions are pure and conservative. UI formatting never affects them.
 use crate::model::{
     AccountAvailability, AccountQuota, AccountSummary, Coverage, QuotaWindow, Recommendation,
-    TotalQuota,
 };
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use std::collections::HashSet;
@@ -226,7 +225,7 @@ pub fn total_quota(
     accounts: &[AccountSummary],
     quotas: &[AccountQuota],
     now: DateTime<Utc>,
-) -> TotalQuota {
+) -> crate::model::TotalQuota {
     crate::quota_total::calculate(
         accounts,
         quotas,
@@ -365,7 +364,8 @@ mod tests {
             .iter()
             .any(|window| window.scope == "base" && window.exhausted == Some(true));
         AccountQuota {
-            five_hour_weekly_ratio: None,
+            calibration: None,
+            five_hour_weekly_ratio: Some(0.15), // Synthetic calibrated ratio.
             plan_type: None,
             account_id: id.into(),
             origin: "network".into(),
@@ -385,6 +385,7 @@ mod tests {
     }
     fn account(id: &str, order: u64) -> AccountSummary {
         AccountSummary {
+            pools: vec![],
             id: id.into(),
             display_name: "Same name".into(),
             alias: None,
