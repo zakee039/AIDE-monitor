@@ -18,7 +18,7 @@ export function selectedQuotaProvider(settings: Settings, accounts: AccountSumma
 const profiles: Record<string, [string, string][]> = {
   chatgpt: [["plus", "Plus / Team / Business · 1× · 15%"], ["pro5x", "Pro 5× · 15%"], ["pro10x", "Pro 10× · 15%"], ["pro20x", "Pro 20× · 15%"]],
   claude: [["pro", "Pro · 1× · 15%"], ["max5x", "Max 5× · 10%"], ["max20x", "Max 20× · 20%"]],
-  antigravity: [["pro", "Google AI Pro · 1× · 25%"], ["ultra5x", "Google AI Ultra 5× · 25%"]],
+  antigravity: [["pro", "Google AI Pro · 1× · Gemini 25% / Claude 50%"], ["ultra5x", "Google AI Ultra 5× · Gemini 25% / Claude 50%"]],
   grok: [["supergrok", "SuperGrok · 1×"]],
 };
 
@@ -41,7 +41,8 @@ export function QuotaSettings({ settings, accounts, busy, onChange }: {
     <p className="quota-help">{t("只累计所选平台中已勾选的账号与额度池，沿用订阅档位估算。")}</p>
     <details className="quota-profile-settings"><summary>{t("订阅额度换算（估算）")}</summary>
       <p className="quota-help">{t("自动读取订阅；未返回订阅时暂按基础档估算，无法识别的档位不累计。可在此指定档位。")}</p>
-      <p className="quota-help">{t("百分比表示一份完整 5h 额度对应的周额度。Ultra 的 25% 为占位值；Grok 高级档请自定义倍率。")}</p>
+      <p className="quota-help">{t("5h 显示为折算后的周额度，并以剩余周额度为上限。比例为本地估算，可自定义；Grok 仅显示服务端返回的周或月额度。")}</p>
+      <p className="quota-help">{t("历史额度及倒计时以半透明显示，成功取得新数据后恢复。")}</p>
       {accounts.filter(a => quotaProvider(a.providerId) === active).map(a => <ProfileRow key={a.id} account={a} value={settings.display.quotaProfiles?.[a.id] ?? ""} busy={busy} save={value => save(a.id, value)} />)}
     </details>
   </>;

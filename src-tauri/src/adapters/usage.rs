@@ -18,7 +18,7 @@ pub async fn fetch_quota(
     hud_account_id: &str,
 ) -> Result<AccountQuota, ApiError> {
     if credentials.provider == "antigravity" {
-        if let Ok(quota) = super::antigravity_local::fetch_quota(hud_account_id).await {
+        if let Ok(quota) = super::antigravity_local::fetch_quota(hud_account_id, credentials, client).await {
             return Ok(quota);
         }
     }
@@ -204,6 +204,7 @@ pub fn parse_usage(
         .checked_add_signed(Duration::seconds(300))
         .map(timestamp);
     Ok(AccountQuota {
+        five_hour_weekly_ratio: None,
         plan_type: super::providers::plan_type(value),
         account_id: hud_account_id.to_owned(),
         origin: "network".into(),
@@ -257,6 +258,7 @@ fn parse_window(
         .filter(|date| date.timestamp() <= 253_402_300_799)
         .map(timestamp);
     QuotaWindow {
+        retained_at: None,
         id: format!("{}-{kind}", scope.replace(':', "-")),
         scope: scope.into(),
         kind: kind.into(),
@@ -391,6 +393,7 @@ mod tests {
             .build()
             .unwrap();
         let credentials = Credentials {
+            account_email: None,
             provider: "codex_usage".into(),
             project_id: None,
             gcp: false,

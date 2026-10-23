@@ -27,6 +27,10 @@ if (scenario && ["scaled", "weekly", "mixed", "total", "zero", "low"].includes(s
   accounts = accounts.map((account, index) => ({ ...account, selected: index < 2 }));
 }
 if (scenario === "providers") accounts = accounts.map((account, index) => ({ ...account, providerId: ["codex", "claude", "antigravity", "grok"][index], displayName: ["Codex demo", "Claude demo", "Google demo", "Grok demo"][index], selected: true }));
+if (scenario === "quota-review") {
+  accounts = accounts.map((a, i) => ({ ...a, providerId: i < 2 ? "codex" : "antigravity", selected: true }));
+  settings.accountPools = { "demo-work": ["claude"], "demo-personal": ["gemini4"] };
+}
 if (scenario?.startsWith("orb-")) accounts = accounts.map((account, index) => ({ ...account, selected: index === 0 }));
 
 function result<T>(data: T): ApiResult<T> {
@@ -135,6 +139,23 @@ export function demoSnapshot(): Snapshot {
     }
   }
   selected = poolAccounts; quotas = poolQuotas;
+  if (scenario === "quota-review") quotas.forEach((q, i) => {
+    q.origin = "network"; q.freshness = "fresh"; q.baseCoverageComplete = true;
+    q.windows = [i === 0 ? 85 : 100, [90, 0, 55, 60][i]].map((value, j) => ({
+      id: j ? "weekly" : "five", scope: "base", kind: j ? "secondary" : "primary", label: j ? "7d" : "5h",
+      durationSeconds: j ? 604800 : 18000, applicability: "required", measurement: "percent", remainingPercent: value,
+      exhausted: value === 0, resetsAt: new Date(baseTime + (j ? 4 * 86400 : 4 * 3600) * 1000).toISOString(),
+      retainedAt: i === 3 ? new Date(baseTime - 2 * 86400000).toISOString() : null,
+    }));
+    if (i === 3) q.windows.shift();
+  });
+  for (const quota of quotas) {
+    const account = selected.find(a => a.id === quota.accountId)!;
+    const profile = settings.display.quotaProfiles?.[account.id.split("::pool:")[0]] ?? "";
+    quota.fiveHourWeeklyRatio = profile.startsWith("custom:") ? +profile.split(":")[2] / 100
+      : account.id.endsWith("::pool:claude") ? 0.5 : account.providerId === "antigravity" ? 0.25
+      : profile === "max5x" ? 0.1 : profile === "max20x" ? 0.2 : 0.15;
+  }
   const availability: Snapshot["availability"] = quotas.map(quota => {
     if (quota.freshness !== "fresh" || quota.origin !== "network" || !quota.baseCoverageComplete) return { accountId: quota.accountId, state: "unknown", reason: "stale", estimatedAvailableAt: null };
     const blocked = quota.windows.filter(window => window.applicability === "required" && (window.remainingPercent ?? 0) < (window.durationSeconds === 18000 ? 5 : 2));
@@ -153,10 +174,10 @@ export function demoSnapshot(): Snapshot {
     const windows = quota.windows.filter(w => w.scope === "base");
     const week = windows.find(w => w.durationSeconds === 604800)?.remainingPercent;
     const five = windows.find(w => w.durationSeconds === 18000)?.remainingPercent;
-    const profile = settings.display.quotaProfiles?.[quota.accountId] ?? "";
+    const profile = settings.display.quotaProfiles?.[quota.accountId.split("::pool:")[0]] ?? "";
     const custom = profile.split(":");
     const multiplier = profile.startsWith("custom:") ? +custom[1] : ({ pro5x: 5, pro10x: 10, pro20x: 20, max5x: 5, max20x: 20, ultra5x: 5 } as Record<string, number>)[profile] ?? 1;
-    const ratio = profile.startsWith("custom:") ? +custom[2] / 100 : profile === "max5x" ? 0.1 : profile === "max20x" ? 0.2 : baseRatio;
+    const ratio = quota.fiveHourWeeklyRatio ?? baseRatio;
     return week == null ? [] : [five == null ? week * multiplier / (hasFive ? baseRatio : 1) : five < 5 || week < 2 ? 0 : multiplier * Math.min(five, week / ratio)];
   });
   const ownAvailable = own.find(a => availability.some(v => v.accountId === a.id && v.state === "now"));

@@ -21,6 +21,18 @@ pub fn scope(pool: &str) -> &'static str {
         _ => "base",
     }
 }
+pub fn tracks_window(
+    provider: &str,
+    id: &str,
+    choices: &BTreeMap<String, Vec<String>>,
+    window: &QuotaWindow,
+) -> bool {
+    window.applicability == "required"
+        && (window.scope == "base"
+            || selected(provider, id, choices)
+                .into_iter()
+                .any(|pool| scope(pool) == window.scope))
+}
 pub fn refresh_ids(
     requested: Vec<String>,
     physical: &[String],
@@ -93,6 +105,7 @@ pub fn project(
             // A pool that has not been returned must remain unknown, including its reset.
             if sample.windows.is_empty() {
                 sample.windows.push(QuotaWindow {
+                    retained_at: None,
                     id: format!("{pool}-weekly"),
                     scope: "base".into(),
                     kind: "primary".into(),

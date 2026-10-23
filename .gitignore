@@ -12,6 +12,7 @@ artifacts/SHA256SUMS.txt
 artifacts/release-v*/
 
 artifacts/ui-test/
+artifacts/review-v*/
 artifacts/legacy-previews/
 artifacts/theme-export-test.json
 

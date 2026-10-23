@@ -47,14 +47,28 @@ fn custom(value: &str) -> Option<(f64, f64)> {
         .then_some((m, r / 100.))
 }
 fn policy(platform: &str, q: &AccountQuota, display: &DisplaySettings) -> Option<(f64, f64)> {
-    if let Some(value) = display.quota_profiles.get(crate::quota_pools::source_id(&q.account_id)) {
-        return profile(platform, value).or_else(|| custom(value));
+    let pool_policy = |value: (f64, f64)| {
+        // User-calibrated third-party pool; Gemini keeps its separate 25% estimate.
+        if platform == "antigravity" && q.account_id.ends_with("::pool:claude") {
+            (value.0, 0.50)
+        } else {
+            value
+        }
+    };
+    if let Some(value) = display
+        .quota_profiles
+        .get(crate::quota_pools::source_id(&q.account_id))
+    {
+        return custom(value).or_else(|| profile(platform, value).map(pool_policy));
     }
     if let Some(name) = &q.plan_type {
-        return profile(platform, name);
+        return profile(platform, name).map(pool_policy);
     }
     // The UI explicitly identifies this fallback as a base-plan estimate.
-    Some((1., base_ratio(platform)))
+    Some(pool_policy((1., base_ratio(platform))))
+}
+pub fn weekly_ratio(provider_id: &str, q: &AccountQuota, display: &DisplaySettings) -> Option<f64> {
+    policy(provider(provider_id), q, display).map(|(_, ratio)| ratio)
 }
 fn base_ratio(platform: &str) -> f64 {
     if platform == "antigravity" {
@@ -83,7 +97,9 @@ pub fn effective_provider<'a>(requested: &'a str, accounts: &'a [AccountSummary]
 fn scoped_quota(q: &AccountQuota, platform: &str) -> AccountQuota {
     let mut q = q.clone();
     // Projected entries already contain exactly one pool and its own coverage.
-    if crate::quota_pools::source_id(&q.account_id) != q.account_id { return q; }
+    if crate::quota_pools::source_id(&q.account_id) != q.account_id {
+        return q;
+    }
     if platform == "antigravity" {
         // Match the Gemini pool already displayed in the expanded HUD. Never add model pools.
         q.windows.retain(|w| w.scope == "feature:gemini");
@@ -131,10 +147,17 @@ pub fn calculate(
         .map(|q| {
             // Totals may display the last successful sample after a failed refresh.
             // Keep the authoritative quota/error intact so account eligibility still reports failure.
-            if q.error.is_some() && q.origin == "network" {
-                if let Some(success) = q
-                    .last_success_at
-                    .as_deref()
+            let retained = q
+                .windows
+                .iter()
+                .filter(|w| w.scope == "base")
+                .filter_map(|w| w.retained_at.as_deref())
+                .min();
+            if (q.error.is_some() || q.freshness == "stale" || retained.is_some())
+                && q.origin == "network"
+            {
+                if let Some(success) = retained
+                    .or(q.last_success_at.as_deref())
                     .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
                     .map(|value| value.with_timezone(&Utc))
                     .filter(|success| *success <= now)
@@ -143,6 +166,11 @@ pub fn calculate(
                     previous.error = None;
                     previous.status = "ok".into();
                     previous.freshness = "fresh".into();
+                    previous.last_success_at = Some(success.to_rfc3339());
+                    previous.valid_until = None;
+                    for w in &mut previous.windows {
+                        w.retained_at = None;
+                    }
                     return domain::evaluate(&previous, success);
                 }
             }
@@ -173,8 +201,15 @@ pub fn calculate(
             .filter(|w| w.scope == "base" && w.applicability == "required")
             .collect();
         let five = required.iter().find(|w| w.duration_seconds == Some(18000));
-        let week = required.iter().find(|w| w.duration_seconds == Some(604800))
-            .or_else(|| (platform == "grok" && required.len() == 1 && required[0].duration_seconds.is_some_and(|d| d > 0)).then(|| &required[0]));
+        let week = required
+            .iter()
+            .find(|w| w.duration_seconds == Some(604800))
+            .or_else(|| {
+                (platform == "grok"
+                    && required.len() == 1
+                    && required[0].duration_seconds.is_some_and(|d| d > 0))
+                .then(|| &required[0])
+            });
         let Some(b) = week.and_then(|w| w.remaining_percent) else {
             continue;
         };
@@ -199,8 +234,10 @@ pub fn calculate(
         if let Some(value) = contribution {
             total += value;
             known += 1;
-            estimated |=
-                q.plan_type.is_none() && !display.quota_profiles.contains_key(crate::quota_pools::source_id(&q.account_id));
+            estimated |= q.plan_type.is_none()
+                && !display
+                    .quota_profiles
+                    .contains_key(crate::quota_pools::source_id(&q.account_id));
         }
     }
     TotalQuota {
@@ -217,6 +254,43 @@ pub fn calculate(
 mod tests {
     use super::*;
     use chrono::Duration;
+    #[test]
+    fn ratio_policy_distinguishes_pools_and_respects_custom_overrides() {
+        let mut q = AccountQuota::empty("a::pool:claude");
+        let mut display = DisplaySettings::default();
+        assert_eq!(weekly_ratio("antigravity", &q, &display), Some(0.5));
+        q.plan_type = Some("pro".into());
+        assert_eq!(weekly_ratio("antigravity", &q, &display), Some(0.5));
+        q.account_id = "a::pool:gemini3".into();
+        assert_eq!(weekly_ratio("antigravity", &q, &display), Some(0.25));
+        display
+            .quota_profiles
+            .insert("a".into(), "custom:2:30".into());
+        assert_eq!(weekly_ratio("antigravity", &q, &display), Some(0.3));
+        q.account_id = "a::pool:claude".into();
+        assert_eq!(weekly_ratio("antigravity", &q, &display), Some(0.3));
+        q.account_id = "b".into();
+        q.plan_type = Some("plus".into());
+        assert_eq!(weekly_ratio("codex_usage", &q, &display), Some(0.15));
+    }
+    #[test]
+    fn retained_pool_keeps_total_but_not_current_account_eligibility() {
+        let now = Utc::now();
+        let mut q = quota("a::pool:gemini4", None, 60., now);
+        q.windows[0].retained_at = q.last_success_at.clone();
+        q.last_success_at = Some((now + Duration::hours(1)).to_rfc3339());
+        let mut display = DisplaySettings::default();
+        display.quota_provider = "antigravity".into();
+        let a = [account("a::pool:gemini4", "antigravity")];
+        assert_eq!(
+            domain::evaluate(&q, now + Duration::hours(1)).reason,
+            "stale"
+        );
+        assert_eq!(
+            calculate(&a, &[q], now + Duration::hours(1), &display).percent,
+            Some(60.)
+        );
+    }
     #[test]
     fn failed_refresh_retains_totals_without_changing_account_eligibility() {
         let now = Utc::now();
@@ -312,6 +386,7 @@ mod tests {
             .into_iter()
             .filter_map(|(duration, value)| {
                 value.map(|value| QuotaWindow {
+                    retained_at: None,
                     id: duration.to_string(),
                     scope: "base".into(),
                     kind: if duration == 18000 {
@@ -426,7 +501,7 @@ mod tests {
         assert_eq!(effective_provider("claude", &a), "chatgpt");
     }
     #[test]
-    fn antigravity_uses_only_gemini_and_rejects_missing_or_stale_data() {
+    fn antigravity_uses_only_gemini_retains_stale_balance_and_rejects_missing_data() {
         let now = Utc::now();
         let a = [account("g", "antigravity")];
         let mut display = DisplaySettings::default();
@@ -445,7 +520,10 @@ mod tests {
             Some(40.)
         );
         q.freshness = "stale".into();
-        assert!(calculate(&a, &[q.clone()], now, &display).percent.is_none());
+        assert_eq!(
+            calculate(&a, &[q.clone()], now, &display).percent,
+            Some(40.)
+        );
         q.freshness = "fresh".into();
         q.windows.remove(0);
         assert!(calculate(&a, &[q], now, &display).percent.is_none());

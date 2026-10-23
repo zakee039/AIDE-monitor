@@ -1,14 +1,15 @@
 import type { AccountQuota, QuotaWindow, Snapshot } from "../contracts/hud-api.ts";
+import { effectiveQuotaWindows } from "./quota-display.ts";
 export const displayProvider = (id: string) => id === "codex" || id === "codex_usage" ? "chatgpt" : id;
 export function displayWindows(quota: AccountQuota | undefined, provider: string): QuotaWindow[] {
-  return quota?.windows.filter(w => w.applicability !== "not_applicable" && (provider === "antigravity" ? (w.scope === "base" || w.scope === "feature:gemini") : provider === "grok" || w.scope === "base")).sort((a,b)=>(a.durationSeconds??0)-(b.durationSeconds??0)) ?? [];
+  return effectiveQuotaWindows(quota).filter(w => w.applicability !== "not_applicable" && (provider === "antigravity" ? (w.scope === "base" || w.scope === "feature:gemini") : provider === "grok" || w.scope === "base")).sort((a,b)=>(a.durationSeconds??0)-(b.durationSeconds??0));
 }
 export function freshQuota(quota: AccountQuota | undefined, now: number): boolean {
   return !!quota && quota.freshness === "fresh" && quota.origin === "network" && !quota.error && (quota.status === "ok" || quota.status === "refreshing") && (!quota.validUntil || Date.parse(quota.validUntil) > now);
 }
 /** Failed refreshes retain their last successful measurements, visibly marked as uncertain. */
 export function displayableQuota(quota: AccountQuota | undefined, now: number): boolean {
-  return freshQuota(quota, now) || !!(quota?.error && quota.lastSuccessAt && quota.windows.length);
+  return freshQuota(quota, now) || !!(quota?.lastSuccessAt && quota.windows.length);
 }
 /** The next reset in the same pool as the platform total, never the polling timer. */
 export function nextProviderReset(snapshot: Snapshot | null, provider: string, now: number): string | null {

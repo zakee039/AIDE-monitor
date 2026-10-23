@@ -29,6 +29,7 @@ pub struct SourceCatalog {
 
 // Deliberately lacks Debug and Serialize: credentials must not enter logs or transports.
 pub struct Credentials {
+    pub(crate) account_email: Option<String>,
     pub(crate) provider: String,
     pub(crate) project_id: Option<String>,
     pub(crate) gcp: bool,
@@ -235,6 +236,7 @@ fn credentials_from_detail(value: &Value, source_id: &str) -> Result<Credentials
             )
         })?;
     Ok(Credentials {
+        account_email: None,
         provider: "codex_usage".into(),
         project_id: None,
         gcp: false,

@@ -1,5 +1,7 @@
 use crate::model::{AccountQuota, ApiError};
 use chrono::Utc;
+use futures_util::StreamExt;
+use serde_json::Value;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -14,42 +16,41 @@ struct CachedProbe {
 static PROBE_CACHE: Mutex<Option<CachedProbe>> = Mutex::new(None);
 
 #[cfg(windows)]
-pub async fn fetch_quota(hud_account_id: &str) -> Result<AccountQuota, ApiError> {
+pub async fn fetch_quota(
+    hud_account_id: &str,
+    credentials: &super::cockpit::Credentials,
+    identity_client: &reqwest::Client,
+) -> Result<AccountQuota, ApiError> {
+    let expected_email = credentials.account_email.as_deref().unwrap_or("");
     let (ports, token) = probe_ports_and_token()
         .ok_or_else(|| ApiError::new("NOT_RUNNING", "本地 Language Server 未运行"))?;
 
     let client = reqwest::Client::builder()
         .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_millis(800))
         .build()
         .map_err(|_| ApiError::new("LOCAL_CLIENT_FAILED", "创建本地请求客户端失败"))?;
 
+    // Only resolve a stale/alias email after a live server reports a different identity.
+    // Keep the result within this fetch: never reuse it across credentials or login switches.
+    let mut canonical_email = None;
     for port in ports {
-        let url = format!(
-            "http://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary"
-        );
-        let res = client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .header("Connect-Protocol-Version", "1")
-            .header("x-codeium-csrf-token", &token)
-            .body("{}")
-            .send()
-            .await;
-
-        match res {
-            Ok(resp) => {
-                if resp.status().is_success() {
-                    if let Ok(bytes) = resp.bytes().await {
-                        if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-                            if let Ok(quota) = super::providers::parse(
-                                &val,
-                                "antigravity",
-                                hud_account_id,
-                                Utc::now(),
-                            ) {
-                                return Ok(quota);
-                            }
+        match fetch_verified(&client, port, &token, expected_email, hud_account_id).await {
+            Ok(quota) => return Ok(quota),
+            Err(error) if error.code == "LOCAL_ACCOUNT_MISMATCH" => {
+                let resolved = match &canonical_email {
+                    Some(result) => result,
+                    None => canonical_email.insert(
+                        google_account_email(identity_client, &credentials.access_token).await,
+                    ),
+                };
+                if let Ok(email) = resolved {
+                    if !email.eq_ignore_ascii_case(expected_email.trim()) {
+                        if let Ok(quota) =
+                            fetch_verified(&client, port, &token, email, hud_account_id).await
+                        {
+                            return Ok(quota);
                         }
                     }
                 }
@@ -70,8 +71,140 @@ pub async fn fetch_quota(hud_account_id: &str) -> Result<AccountQuota, ApiError>
 }
 
 #[cfg(not(windows))]
-pub async fn fetch_quota(_hud_account_id: &str) -> Result<AccountQuota, ApiError> {
+pub async fn fetch_quota(
+    _hud_account_id: &str,
+    _credentials: &super::cockpit::Credentials,
+    _identity_client: &reqwest::Client,
+) -> Result<AccountQuota, ApiError> {
     Err(ApiError::new("NOT_SUPPORTED", "非 Windows 平台"))
+}
+
+fn identity_error() -> ApiError {
+    ApiError::new(
+        "LOCAL_IDENTITY_UNVERIFIED",
+        "无法确认本地服务属于该账号，改用账号凭据查询",
+    )
+}
+fn account_mismatch() -> ApiError {
+    ApiError::new("LOCAL_ACCOUNT_MISMATCH", "本地账号邮箱与保存的账号信息不同")
+}
+
+fn verified_google_email(value: &Value) -> Result<String, ApiError> {
+    // The subject is Google's stable account identifier. Local GetUserStatus does not
+    // expose it, so bridge this authenticated credential to its current verified email.
+    let subject = value.get("sub").and_then(Value::as_str);
+    if !subject.is_some_and(|s| !s.is_empty() && s.len() <= 255)
+        || value.get("email_verified").and_then(Value::as_bool) != Some(true)
+    {
+        return Err(identity_error());
+    }
+    value
+        .get("email")
+        .and_then(Value::as_str)
+        .filter(|email| valid_email(email))
+        .map(|email| email.trim().to_owned())
+        .ok_or_else(identity_error)
+}
+
+// The caller's remote client disables redirects. Credentials go only to Google's
+// fixed UserInfo endpoint, never to a URL supplied by a local server or account file.
+async fn google_account_email(client: &reqwest::Client, access_token: &str) -> Result<String, ApiError> {
+    let mut auth = reqwest::header::HeaderValue::from_str(&format!("Bearer {access_token}"))
+        .map_err(|_| identity_error())?;
+    auth.set_sensitive(true);
+    let response = client
+        .get("https://openidconnect.googleapis.com/v1/userinfo")
+        .header(reqwest::header::AUTHORIZATION, auth)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .map_err(|_| identity_error())?;
+    if !response.status().is_success() {
+        return Err(identity_error());
+    }
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| identity_error())?;
+        if bytes.len().saturating_add(chunk.len()) > 64 * 1024 {
+            return Err(identity_error());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    verified_google_email(&serde_json::from_slice(&bytes).map_err(|_| identity_error())?)
+}
+fn valid_email(email: &str) -> bool {
+    let email = email.trim();
+    email.len() <= 320
+        && email
+            .split_once('@')
+            .is_some_and(|(a, b)| !a.is_empty() && !b.is_empty())
+        && !email.chars().any(char::is_whitespace)
+}
+fn matches_identity(status: &Value, expected: &str) -> bool {
+    valid_email(expected)
+        && ["/userStatus/email", "/response/userStatus/email"]
+            .iter()
+            .any(|path| {
+                status
+                    .pointer(path)
+                    .and_then(Value::as_str)
+                    .is_some_and(|email| {
+                        valid_email(email) && email.trim().eq_ignore_ascii_case(expected.trim())
+                    })
+            })
+}
+async fn local_rpc(
+    client: &reqwest::Client,
+    port: u16,
+    token: &str,
+    method: &str,
+) -> Result<Value, ApiError> {
+    let mut csrf = reqwest::header::HeaderValue::from_str(token).map_err(|_| identity_error())?;
+    csrf.set_sensitive(true);
+    let response = client
+        .post(format!(
+            "http://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/{method}"
+        ))
+        .header("Content-Type", "application/json")
+        .header("Connect-Protocol-Version", "1")
+        .header("x-codeium-csrf-token", csrf)
+        .body("{}")
+        .send()
+        .await
+        .map_err(|_| identity_error())?;
+    if !response.status().is_success() {
+        return Err(identity_error());
+    }
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| identity_error())?;
+        if bytes.len().saturating_add(chunk.len()) > 1024 * 1024 {
+            return Err(identity_error());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&bytes).map_err(|_| identity_error())
+}
+async fn fetch_verified(
+    client: &reqwest::Client,
+    port: u16,
+    token: &str,
+    expected: &str,
+    id: &str,
+) -> Result<AccountQuota, ApiError> {
+    // Verify on every request, never cache identity with the process/port cache.
+    let before = local_rpc(client, port, token, "GetUserStatus").await?;
+    if !matches_identity(&before, expected) {
+        return Err(account_mismatch());
+    }
+    let value = local_rpc(client, port, token, "RetrieveUserQuotaSummary").await?;
+    let after = local_rpc(client, port, token, "GetUserStatus").await?;
+    if !matches_identity(&after, expected) {
+        return Err(account_mismatch());
+    }
+    super::providers::parse(&value, "antigravity", id, Utc::now())
 }
 
 #[cfg(windows)]
@@ -383,9 +516,11 @@ fn get_listening_ports(pid: u32) -> Vec<u16> {
         if offset + 24 > buf.len() {
             break;
         }
-        let row_pid = u32::from_ne_bytes(buf[offset + 20..offset + 24].try_into().unwrap_or([0; 4]));
+        let row_pid =
+            u32::from_ne_bytes(buf[offset + 20..offset + 24].try_into().unwrap_or([0; 4]));
         if row_pid == pid {
-            let raw_port = u32::from_ne_bytes(buf[offset + 8..offset + 12].try_into().unwrap_or([0; 4]));
+            let raw_port =
+                u32::from_ne_bytes(buf[offset + 8..offset + 12].try_into().unwrap_or([0; 4]));
             let port = u16::from_be((raw_port & 0xffff) as u16);
             ports.push(port);
         }
@@ -400,15 +535,86 @@ fn get_listening_ports(pid: u32) -> Vec<u16> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn canonical_identity_requires_verified_google_email_and_subject() {
+        let verified = serde_json::json!({"sub":"stable-google-subject", "email":"current@example.test", "email_verified":true});
+        let email = verified_google_email(&verified).unwrap();
+        assert!(matches_identity(&serde_json::json!({"userStatus":{"email":"current@example.test"}}), &email));
+        assert!(!matches_identity(&serde_json::json!({"userStatus":{"email":"other@example.test"}}), &email));
+        for invalid in [
+            serde_json::json!({"email":"current@example.test", "email_verified":true}),
+            serde_json::json!({"sub":"", "email":"current@example.test", "email_verified":true}),
+            serde_json::json!({"sub":"stable", "email":"current@example.test", "email_verified":false}),
+            serde_json::json!({"sub":"stable", "email":"current@example.test"}),
+            serde_json::json!({"sub":"stable", "email":"display-alias", "email_verified":true}),
+        ] {
+            assert!(verified_google_email(&invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn identity_requires_exact_account_email_not_display_name() {
+        let status = serde_json::json!({"userStatus":{"email":"Alice@example.test"}});
+        assert!(matches_identity(&status, " alice@example.test "));
+        assert!(!matches_identity(&status, "bob@example.test"));
+        assert!(!matches_identity(&status, ""));
+        assert!(!matches_identity(
+            &serde_json::json!({"userStatus":{"name":"alice@example.test"}}),
+            "alice@example.test"
+        ));
+    }
+
     #[tokio::test]
-    async fn test_native_probe_and_fetch() {
-        if let Some((ports, token)) = probe_ports_and_token() {
-            println!("Probed ports: {:?}, token: {}", ports, token);
-            assert!(!ports.is_empty());
-            assert!(!token.is_empty());
-            let quota = fetch_quota("test-account").await;
-            println!("Quota result: {:?}", quota);
-            assert!(quota.is_ok());
+    async fn verified_fetch_rejects_wrong_missing_and_switched_identity() {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        for (before, after, expected_ok) in [
+            ("a@example.test", "a@example.test", true),
+            ("b@example.test", "b@example.test", false),
+            ("", "", false),
+            ("a@example.test", "b@example.test", false),
+        ] {
+            let server = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = server.local_addr().unwrap().port();
+            let task = tokio::spawn(async move {
+                let mut replies = vec![(
+                    "GetUserStatus",
+                    serde_json::json!({"userStatus":{"email":before}}),
+                )];
+                if before == "a@example.test" {
+                    replies.push(("RetrieveUserQuotaSummary", serde_json::json!({"response":{"groups":[{"buckets":[{"bucketId":"gemini-weekly","remainingFraction":0.6}]}]}})));
+                    replies.push((
+                        "GetUserStatus",
+                        serde_json::json!({"userStatus":{"email":after}}),
+                    ));
+                }
+                for (method, body) in replies {
+                    let (mut socket, _) = server.accept().await.unwrap();
+                    let mut request = vec![0; 4096];
+                    let len = socket.read(&mut request).await.unwrap();
+                    assert!(String::from_utf8_lossy(&request[..len]).contains(method));
+                    let body = body.to_string();
+                    let reply = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    socket.write_all(reply.as_bytes()).await.unwrap();
+                }
+            });
+            let client = reqwest::Client::builder()
+                .no_proxy()
+                .timeout(Duration::from_secs(2))
+                .build()
+                .unwrap();
+            let result =
+                fetch_verified(&client, port, "synthetic-csrf", "a@example.test", "hud-a").await;
+            assert_eq!(result.is_ok(), expected_ok);
+            if let Ok(quota) = result {
+                assert_eq!(quota.account_id, "hud-a");
+            }
+            task.await.unwrap();
         }
     }
 }

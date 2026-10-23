@@ -152,6 +152,7 @@ fn official(root: &Path) -> Result<Option<(SourceAccount, Credentials)>, ApiErro
             is_current: true,
         },
         Credentials {
+            account_email: None,
             provider: "codex_usage".into(),
             project_id: None,
             gcp: false,

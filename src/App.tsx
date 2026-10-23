@@ -1,4 +1,5 @@
 import { PoolPicker } from "./PoolPicker";
+import { effectiveQuotaWindows, historicalWindow, historicalProvider } from "./quota-display";
 import { selectedPools, poolOptions, displayCount } from "./quota-pools";
 import { quotaBandForPercent } from "./quota-colors";
 import { UsbScreen } from "./UsbScreen";
@@ -36,7 +37,7 @@ export function remainingText(window: QuotaWindow): string {
   if (window.applicability === "not_applicable") return "不适用";
   if (window.measurement === "unlimited") return "无限";
   if (window.remainingPercent === null || window.measurement === "unknown") return "未知";
-  return window.remainingPercent > 0 && window.remainingPercent < 1 ? "<1%" : `${Math.floor(window.remainingPercent)}%`;
+  return window.remainingPercent > 0 && window.remainingPercent < 1 ? "<1%" : `${Math.round(window.remainingPercent)}%`;
 }
 
 export function durationText(date: string | null, now: number): string {
@@ -256,7 +257,7 @@ function DemoBanner() { return localize(<div className="demo-banner"><span class
 // Unknown/malformed limits retain a placeholder instead of suggesting extra quota.
 function displayWindows(quota?: AccountQuota): (QuotaWindow | undefined)[] {
   if (!quota) return [undefined];
-  const windows = quota.windows.filter(window => window.scope === "base" && window.applicability !== "not_applicable");
+  const windows = effectiveQuotaWindows(quota).filter(window => window.scope === "base" && window.applicability !== "not_applicable");
   return windows.length ? windows.sort((a, b) => (a.durationSeconds ?? 0) - (b.durationSeconds ?? 0)) : [undefined];
 }
 
@@ -301,7 +302,7 @@ function AccountRow({ account, quota, availability, now, showCredits, windowColu
   return localize(<div className={`compact-row state-${state}`} data-tauri-drag-region>
     <button className={`row-refresh ${refreshing ? "refreshing" : ""}`} aria-label={`刷新 ${account.displayName}`} disabled={!interactive || refreshing} onClick={() => { void refresh(); }}><RefreshCw size={13} className={refreshing ? "spin" : ""} /></button>
     <span className="compact-name" translate="no" data-tauri-drag-region><ProviderIcon provider={account.providerId} />{account.displayName}</span>
-    {windows.map((window, index) => <span className={`compact-quota ${quotaBand(window)}`} style={{ gridColumn: `${4 + windowColumns.indexOf(windowColumnKey(window)) * 4} / span 3` }} key={window?.id ?? index} aria-label={`${window?.label ?? "?"} 剩余 ${window ? remainingText(window) : "未知"}，${window ? durationText(window.resetsAt, now) : "待查询"}`} data-tauri-drag-region><strong>{window ? remainingText(window) : "—"}</strong><span className="quota-dot">·</span><span>{window ? durationText(window.resetsAt, now) : "—"}</span></span>)}
+    {windows.map((window, index) => <span className={`compact-quota ${quotaBand(window)} ${historicalWindow(quota, window, now) ? "quota-history" : ""}`} style={{ gridColumn: `${4 + windowColumns.indexOf(windowColumnKey(window)) * 4} / span 3` }} key={window?.id ?? index} aria-label={`${window?.label ?? "?"} 剩余 ${window ? remainingText(window) : "未知"}，${window ? durationText(window.resetsAt, now) : "待查询"}`} data-tauri-drag-region><strong>{window ? remainingText(window) : "—"}</strong><span className="quota-dot">·</span><span>{window ? durationText(window.resetsAt, now) : "—"}</span></span>)}
     {showCredits && <span className="reset-credits" style={{ gridColumn: windowColumns.length * 4 + 4 }} aria-label={quota?.resetCreditsAvailable != null ? `可用重置次数 ${quota.resetCreditsAvailable}` : "重置次数未知"} data-tauri-drag-region>{quota?.resetCreditsAvailable != null ? `R: ${quota.resetCreditsAvailable}` : ""}</span>}
     {state === "error" && <span className="row-state state-error" role="img" aria-label={status}>!</span>}
   </div>);
@@ -342,7 +343,7 @@ function QuotaOrb({ snapshot, now, onExpand, locked }: { locked: boolean; snapsh
   }} onPointerUp={() => { drag.current.pressed = false; }} onPointerCancel={() => { drag.current.pressed = false; }} onClick={event => {
     if (event.detail === 0 || !drag.current.moved) onExpand();
     drag.current.moved = false;
-  }}><span className={timeLines ? "orb-countdown" : undefined}>{timeLines ? timeLines.map(line => <span key={line}>{line}</span>) : text}</span></button>;
+  }}><span className={`${timeLines ? "orb-countdown" : ""} ${historicalProvider(snapshot, total?.providerId, now) ? "quota-history" : ""}`}>{timeLines ? timeLines.map(line => <span key={line}>{line}</span>) : text}</span></button>;
 }
 
 type Performer = (key: string, action: () => Promise<unknown>, success?: string) => Promise<void>;

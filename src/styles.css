@@ -271,6 +271,7 @@ select { min-height: 32px; font-size: 11px; border: 1px solid var(--border); bor
 .compact-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; max-width: 24ch; }
 .compact-quota { display: grid; grid-template-columns: subgrid; align-items: baseline; white-space: nowrap; font-family: "Cascadia Mono", Consolas, monospace; font-variant-numeric: tabular-nums; font-size: 12px; }
 .compact-quota strong { font-weight: 600; text-align: right; justify-self: end; }
+.quota-history { opacity: 0.45; }
 .compact-quota > span:last-child { color: var(--text-muted); }
 .quota-dot { color: var(--text-muted); padding: 0 3px; }
 /* Identical quota thresholds for every built-in/custom theme; brightness follows the background. */

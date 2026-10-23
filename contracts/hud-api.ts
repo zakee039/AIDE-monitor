@@ -46,6 +46,7 @@ export interface AccountSummary {
 }
 
 export interface QuotaWindow {
+  retainedAt?: UtcTime | null; // Original sample time for a retained historical window.
   id: string; // unique and stable within an account
   scope: "base" | `feature:${string}`;
   kind: "primary" | "secondary" | "other";
@@ -59,6 +60,7 @@ export interface QuotaWindow {
 }
 
 export interface AccountQuota {
+  fiveHourWeeklyRatio?: number | null; // Local estimate shared with the total-quota policy.
   planType?: string | null;
   resetCreditsAvailable?: number | null; // Available manual resets; absent/invalid stays unknown.
   accountId: AccountId;

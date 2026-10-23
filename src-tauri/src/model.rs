@@ -58,6 +58,9 @@ pub struct AccountSummary {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct QuotaWindow {
+    /// Original sample time when this window was retained after a missing/invalid result.
+    #[serde(default)]
+    pub retained_at: Option<String>,
     pub id: String,
     pub scope: String,
     pub kind: String,
@@ -73,6 +76,8 @@ pub struct QuotaWindow {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountQuota {
+    #[serde(default)]
+    pub five_hour_weekly_ratio: Option<f64>,
     #[serde(default)]
     pub plan_type: Option<String>,
     pub account_id: String,
@@ -96,6 +101,7 @@ impl AccountQuota {
     /// First use must not manufacture a successful network sample.
     pub fn empty(account_id: impl Into<String>) -> Self {
         Self {
+            five_hour_weekly_ratio: None,
             account_id: account_id.into(),
             plan_type: None,
             origin: "none".into(),

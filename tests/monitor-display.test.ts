@@ -24,9 +24,9 @@ test('next reset uses selected platform quota windows, not polling or another pr
  assert.equal(nextProviderReset(data,'chatgpt',now),at(90));
  assert.equal(nextProviderReset(data,'claude',now),null);
 });
-test('invalid, elapsed, stale and other-model resets are excluded',()=>{
+test('historical resets remain visible while invalid, elapsed and other-model resets are excluded',()=>{
  const stale=quota('a',2);stale.freshness='stale';
- assert.equal(nextProviderReset(snapshot([stale,quota('b',-1)]),'chatgpt',now),null);
+ assert.equal(nextProviderReset(snapshot([stale,quota('b',-1)]),'chatgpt',now),at(2));
  const data=quota('c',120,'feature:gemini');data.windows.push({...data.windows[0],id:'claude',scope:'feature:claude',resetsAt:at(5)});
  assert.equal(nextProviderReset(snapshot([data]),'antigravity',now),at(120));
  assert.equal(resetText(at(-1),now),'—');assert.equal(resetText('bad',now),'—');assert.equal(resetText(at(90),now),'1h30m');

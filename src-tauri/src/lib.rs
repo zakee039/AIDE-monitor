@@ -5,6 +5,7 @@ mod model;
 mod network;
 mod quota_total;
 mod quota_pools;
+mod quota_history;
 mod service;
 mod smoke;
 mod startup;

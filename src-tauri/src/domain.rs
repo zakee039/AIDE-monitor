@@ -119,6 +119,9 @@ pub fn evaluate(quota: &AccountQuota, now: DateTime<Utc>) -> AccountAvailability
         .iter()
         .filter(|window| window.scope == "base")
         .collect();
+    if base.iter().any(|w| w.retained_at.is_some()) {
+        return unknown(quota, "stale");
+    }
     // A past reset invalidates an otherwise young sample. It never restores credit locally.
     for window in &base {
         if window.applicability != "required" {
@@ -339,6 +342,7 @@ mod tests {
     }
     fn window(id: &str, exhausted: bool, reset: Option<i64>) -> QuotaWindow {
         QuotaWindow {
+            retained_at: None,
             id: id.into(),
             scope: "base".into(),
             kind: if id == "secondary" {
@@ -361,6 +365,7 @@ mod tests {
             .iter()
             .any(|window| window.scope == "base" && window.exhausted == Some(true));
         AccountQuota {
+            five_hour_weekly_ratio: None,
             plan_type: None,
             account_id: id.into(),
             origin: "network".into(),
@@ -487,10 +492,9 @@ mod tests {
         );
         assert_eq!(total.percent, Some(52.0));
         assert!(!total.partial);
-        for invalid in ["stale", "cache", "reset", "missing"] {
+        for invalid in ["cache", "reset", "missing"] {
             let mut q = balance("b", 100.0, 100.0);
             match invalid {
-                "stale" => q.freshness = "stale".into(),
                 "cache" => q.origin = "cockpit_cache".into(),
                 "reset" => q.windows[0].resets_at = Some(at(0)),
                 "missing" => q.base_coverage_complete = false,

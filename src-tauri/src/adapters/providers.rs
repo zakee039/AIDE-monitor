@@ -72,6 +72,7 @@ fn window(
 ) -> QuotaWindow {
     let remaining = percent(remaining);
     QuotaWindow {
+        retained_at: None,
         id: id.into(),
         label: label.chars().take(100).collect(),
         scope: scope.into(),
@@ -405,6 +406,7 @@ mod tests {
     fn consumer_placeholder_and_orphan_gcp_flag_do_not_route_to_enterprise() {
         for project in [None, Some("aicode-consumers"), Some("  ")] {
             let c = Credentials {
+                account_email: None,
                 provider: "antigravity".into(),
                 access_token: "synthetic".into(),
                 account_id: None,
@@ -472,6 +474,7 @@ mod tests {
             let r = request(
                 &c,
                 &Credentials {
+                    account_email: None,
                     provider: p.into(),
                     access_token: "secret-synthetic".into(),
                     account_id: None,

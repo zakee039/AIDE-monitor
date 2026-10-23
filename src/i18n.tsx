@@ -3,6 +3,9 @@ import { cloneElement, isValidElement, type ReactNode } from "react";
 let language = "en";
 export function setLanguage(locale: string) { language = locale; }
 const en: Record<string, string> = {
+  "每个额度池单独展示；刷新失败时保留历史值并淡化。": "Each pool is shown separately. Previous values are retained and dimmed when refresh fails.",
+  "5h 显示为折算后的周额度，并以剩余周额度为上限。比例为本地估算，可自定义；Grok 仅显示服务端返回的周或月额度。": "5h balances are expressed as a share of the weekly allowance, capped by the remaining weekly balance. Ratios are adjustable local estimates. Grok shows its reported weekly or monthly quota only.",
+  "历史额度及倒计时以半透明显示，成功取得新数据后恢复。": "Historical balances and countdowns are dimmed until fresh data is received.",
   "额度池": "Quota pools", "选择额度池": "Select pools", "共享额度": "Shared quota",
   "产品消耗占比不作为独立额度池。": "Product usage shares are not separate quota pools.",
   "每个额度池单独展示；未返回的额度显示 —。": "Each pool is shown separately. Unavailable quotas show —.",

@@ -101,6 +101,7 @@ fn credentials(v: &Value, p: &str) -> Result<Credentials, ApiError> {
         )
     })?;
     Ok(Credentials {
+        account_email: v.get("email").and_then(Value::as_str).map(str::to_owned),
         provider: p.into(),
         access_token: access.into(),
         account_id: token(
@@ -190,13 +191,19 @@ fn records(root: &Path) -> Result<Vec<Record>, ApiError> {
             if detail.get("id").and_then(Value::as_str) != Some(id) {
                 return Err(err());
             }
-            if let Some(r) = record(
+            if let Some(mut r) = record(
                 format!("{p}:{id}"),
                 p,
                 detail,
                 e.get("email").and_then(Value::as_str),
                 v.get("current_account_id").and_then(Value::as_str) == Some(id),
             ) {
+                // This is the account index identity, not an editable HUD alias or export name.
+                if let Some(credentials) = r.credentials.as_mut() {
+                    if credentials.account_email.is_none() {
+                        credentials.account_email = e.get("email").and_then(Value::as_str).map(str::to_owned);
+                    }
+                }
                 out.push(r);
             }
         }
@@ -447,6 +454,7 @@ mod tests {
                 .unwrap();
             assert!(a.is_current);
             assert_eq!(read_credentials(root, &a.source_id).unwrap().provider, p);
+            assert_eq!(read_credentials(root, &a.source_id).unwrap().account_email.as_deref(), Some("test@example.test"));
             assert_eq!(json(root, &root.join(folder).join("a.json")).unwrap(), v);
         }
         assert_eq!(list_accounts(root).unwrap().accounts.len(), 3);
