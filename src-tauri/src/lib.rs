@@ -1,5 +1,6 @@
 mod adapters;
 mod config;
+mod diagnostics;
 mod domain;
 mod model;
 mod network;
@@ -804,6 +805,7 @@ pub fn run() {
                 let _ = window_action(app, "hide");
             }
             "aide-quit" => {
+                diagnostics::record("exit.user_requested", json!({"source":"hud-menu"}));
                 app.state::<Service>().flush_position();
                 app.exit(0);
             }
@@ -813,7 +815,10 @@ pub fn run() {
             let _ = window_action(app, "show");
         }))
         .plugin(tauri_plugin_dialog::init())
-        .on_page_load(smoke::on_page_load)
+        .on_page_load(|webview, event| {
+            diagnostics::on_page_load(webview, event);
+            smoke::on_page_load(webview, event);
+        })
         .invoke_handler(tauri::generate_handler![
             usb_display::aide_usb_displays,
             hud_v1_capabilities_get,
@@ -851,6 +856,7 @@ pub fn run() {
         .setup(|app| {
             if smoke::is_enabled() {
                 let state = smoke::prepare_data()?;
+                diagnostics::initialize(state.data_dir.join("logs"));
                 let service = Service::new(state.data_dir.clone(), Some(app.handle().clone()))
                     .map_err(|error| std::io::Error::other(error.message))?;
                 app.manage(state);
@@ -867,6 +873,7 @@ pub fn run() {
                 return Ok(());
             }
             let dir = app.path().app_data_dir()?;
+            diagnostics::initialize(app.path().app_log_dir()?);
             let service = Service::new(dir, Some(app.handle().clone()))
                 .map_err(|error| std::io::Error::other(error.message))?;
             if let Some(hud) = app.get_webview_window("hud") {
@@ -951,6 +958,7 @@ pub fn run() {
                         let _ = service.refresh(RefreshRequest { account_ids: None });
                     }
                     "quit" => {
+                        diagnostics::record("exit.user_requested", json!({"source":"tray-menu"}));
                         app.state::<Service>().flush_position();
                         app.exit(0);
                     }
@@ -971,9 +979,13 @@ pub fn run() {
             }
             tray.build(app)?;
             service.start_background();
+            diagnostics::start_ui_probe(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                diagnostics::window_destroyed(window.label());
+            }
             if window.label() == "usb-display" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
@@ -1040,6 +1052,13 @@ pub fn run() {
                 }
             }
         })
-        .run(context)
-        .expect("Unable to run AIDE monitor");
+        .build(context)
+        .expect("Unable to run AIDE monitor")
+        .run(|_, event| match event {
+            tauri::RunEvent::ExitRequested { code, .. } => {
+                diagnostics::record("exit.requested", json!({"code":code}));
+            }
+            tauri::RunEvent::Exit => diagnostics::exited(),
+            _ => {}
+        });
 }
