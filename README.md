@@ -82,6 +82,8 @@ powershell -ExecutionPolicy Bypass -File tools/build-artifacts.ps1
 .\tools\pack-theme.ps1
 ```
 
+从开发聊天环境启动本机安装版时，使用 `.\tools\start-installed-independent.ps1`，由 Windows 桌面独立启动，避免聊天应用退出或切号时连带关闭。
+
 发布产物位于 `artifacts/release-v<版本号>/`，包括独立运行 EXE、安装包、便携 ZIP 与 SHA-256 校验文件。
 
 ## 项目资料

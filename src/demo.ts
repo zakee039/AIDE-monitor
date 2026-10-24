@@ -206,7 +206,7 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
   let response: ApiResult<unknown>;
   if (["settings.update", "accounts.selection.update"].includes(method) && request.expectedRevision !== settings.settingsRevision) return fail("CONFLICT", "设置已更新，请重试。") as ApiResult<MethodMap[M]["result"]>;
   switch (method) {
-    case "capabilities.get": response = result({ appVersion: "0.7.3", apiVersion: "1.0", transport: "tauri", enabledMethods: methods, grantedScopes: ["quota.read", "quota.refresh", "events.read", "settings.read", "settings.write", "themes.read", "themes.write", "window.control", "diagnostics.read"], themeSchemaVersions: [1], providerIds: ["codex"], maxRefreshAccounts: 100 }); break;
+    case "capabilities.get": response = result({ appVersion: "0.7.4", apiVersion: "1.0", transport: "tauri", enabledMethods: methods, grantedScopes: ["quota.read", "quota.refresh", "events.read", "settings.read", "settings.write", "themes.read", "themes.write", "window.control", "diagnostics.read"], themeSchemaVersions: [1], providerIds: ["codex"], maxRefreshAccounts: 100 }); break;
     case "accounts.list": response = result(accounts.map((account, index) => ({ ...account, displayName: settings.display.privacyMode ? `${settings.display.locale === "zh-CN" ? "账号" : "Account"} ${index + 1}` : account.displayName }))); break;
     case "quota.snapshot.get": response = result(demoSnapshot()); break;
     case "recommendation.get": response = result(demoSnapshot().recommendation); break;
@@ -248,7 +248,7 @@ export async function demoCall<M extends keyof MethodMap>(method: M, params: Met
       settings.settingsRevision++; emit("snapshot.changed"); response = result(settings); break;
     }
     case "window.control": response = result({ accepted: true }); break;
-    case "diagnostics.get": response = result({ appVersion: "0.7.3", adapterVersion: "演示", source, selectedAccountCount: accounts.filter(account => account.selected).length, activeJobCount: refreshing ? 1 : 0, recentErrorCodes: [] }); break;
+    case "diagnostics.get": response = result({ appVersion: "0.7.4", adapterVersion: "演示", source, selectedAccountCount: accounts.filter(account => account.selected).length, activeJobCount: refreshing ? 1 : 0, recentErrorCodes: [] }); break;
     default: response = fail("INVALID_ARGUMENT", "此功能尚未提供。");
   }
   return response as ApiResult<MethodMap[M]["result"]>;
