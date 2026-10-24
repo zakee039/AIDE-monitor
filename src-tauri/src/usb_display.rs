@@ -81,7 +81,8 @@ fn remembered_device(devices: Vec<DisplayDevice>, id: &str) -> Option<DisplayDev
     }
 }
 
-pub fn sync(app: &tauri::AppHandle) {
+// Called only by the serial blocking worker below, never a main-thread callback.
+fn sync(app: &tauri::AppHandle) {
     let settings = app.state::<Service>().settings().usb_display;
     let target = if settings.enabled {
         devices(app)
@@ -99,23 +100,8 @@ pub fn sync(app: &tauri::AppHandle) {
     let window = if let Some(w) = app.get_webview_window("usb-display") {
         w
     } else {
-        let Ok(w) = WebviewWindowBuilder::new(
-            app,
-            "usb-display",
-            WebviewUrl::App("index.html?view=usb".into()),
-        )
-        .title("AIDE monitor · 独立监视屏")
-        .decorations(false)
-        .shadow(false)
-        .maximizable(false)
-        .minimizable(false)
-        .resizable(false)
-        .skip_taskbar(true)
-        .visible(false)
-        .focused(false)
-        .focusable(false)
-        .always_on_top(true)
-        .build() else {
+        let Ok(w) = create_window(app) else {
+            crate::diagnostics::record("usb.window_create_failed", serde_json::json!({}));
             return;
         };
         w
@@ -132,11 +118,16 @@ pub fn sync(app: &tauri::AppHandle) {
             return;
         }
     }
-    // Re-enumerate immediately before showing. Never substitute another screen.
-    if devices(app).is_ok_and(|v| {
-        v.iter()
-            .any(|d| d.id == device.id && d.x == device.x && d.y == device.y)
-    }) {
+    // Settings may change while Windows creates the WebView. Recheck both the
+    // setting and monitor identity before revealing it; never choose a fallback.
+    let current = app.state::<Service>().settings().usb_display;
+    if current.enabled
+        && current.device_id == settings.device_id
+        && devices(app).is_ok_and(|v| {
+            v.iter()
+                .any(|d| d.id == device.id && d.x == device.x && d.y == device.y)
+        })
+    {
         if !window.is_visible().unwrap_or(false) {
             let _ = window.show();
         }
@@ -144,12 +135,45 @@ pub fn sync(app: &tauri::AppHandle) {
         let _ = window.hide();
     }
 }
+
+pub(crate) fn create_window(app: &tauri::AppHandle) -> tauri::Result<WebviewWindow> {
+    // WebView2 creation from Windows' event thread can deadlock. This helper is
+    // also exercised by the isolated native smoke test after the event loop starts.
+    crate::diagnostics::record("usb.window_create_started", serde_json::json!({}));
+    let window = WebviewWindowBuilder::new(
+        app,
+        "usb-display",
+        WebviewUrl::App("index.html?view=usb".into()),
+    )
+    .title("AIDE monitor · 独立监视屏")
+    .decorations(false)
+    .shadow(false)
+    .maximizable(false)
+    .minimizable(false)
+    .resizable(false)
+    .skip_taskbar(true)
+    .visible(false)
+    .focused(false)
+    .focusable(false)
+    .always_on_top(true)
+    .build()?;
+    crate::diagnostics::record("usb.window_created", serde_json::json!({}));
+    Ok(window)
+}
 pub fn start(app: &tauri::AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         loop {
             let handle = app.clone();
-            let _ = app.run_on_main_thread(move || sync(&handle));
+            // Await completion so slow creation or a blocked UI cannot enqueue
+            // an unbounded stream of sync callbacks or create duplicate windows.
+            if tauri::async_runtime::spawn_blocking(move || sync(&handle))
+                .await
+                .is_err()
+            {
+                crate::diagnostics::record("usb.sync_panicked", serde_json::json!({}));
+                return;
+            }
             tokio::time::sleep(std::time::Duration::from_millis(750)).await;
         }
     });

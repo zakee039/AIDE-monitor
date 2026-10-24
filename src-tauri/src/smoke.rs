@@ -93,6 +93,64 @@ fn record(app: &AppHandle, label: &str, value: Value) {
     }
 }
 
+// Exercise the real monitor window factory after the native event loop starts,
+// twice. Never show it or select a real monitor; use the isolated empty source.
+async fn monitor_recreation(app: &AppHandle) -> bool {
+    for _ in 0..2 {
+        let handle = app.clone();
+        let created = tokio::time::timeout(
+            Duration::from_secs(5),
+            tauri::async_runtime::spawn_blocking(move || {
+                crate::usb_display::create_window(&handle)
+            }),
+        )
+        .await;
+        let Ok(Ok(Ok(window))) = created else {
+            return false;
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut ready = false;
+        while Instant::now() < deadline {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            if window
+                .eval_with_callback(
+                    "Boolean(document.querySelector('main.desktop.usb-stage'))",
+                    move |value| {
+                        let _ = tx.send(value == "true");
+                    },
+                )
+                .is_err()
+            {
+                break;
+            }
+            if matches!(
+                tokio::time::timeout(Duration::from_millis(500), rx.recv()).await,
+                Ok(Some(true))
+            ) {
+                ready = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if window.is_visible().ok() != Some(false) || !ready {
+            return false;
+        }
+        if window.destroy().is_err() {
+            return false;
+        }
+        for _ in 0..20 {
+            if app.get_webview_window("usb-display").is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if app.get_webview_window("usb-display").is_some() {
+            return false;
+        }
+    }
+    true
+}
+
 /// Call once after managing `SmokeState` and creating both hidden windows.
 pub fn start_poll(app: &AppHandle) {
     if !is_enabled() {
@@ -112,6 +170,7 @@ pub fn start_poll(app: &AppHandle) {
         let started = Instant::now();
         let mut reopened = false;
         let mut pin_round_trip = false;
+        let mut monitor_recreated = false;
         loop {
             for label in ["hud", "settings"] {
                 let already_finished = results
@@ -193,12 +252,14 @@ pub fn start_poll(app: &AppHandle) {
                         json!({"ok":false,"error":"TRAY_REOPEN_FAILED"}),
                     );
                 }
+                monitor_recreated = monitor_recreation(&app).await;
                 continue;
             }
             if current.len() == 2 || timed_out {
                 let ok = !timed_out
                     && reopened
                     && pin_round_trip
+                    && monitor_recreated
                     && app.get_webview_window("hud").is_some_and(|w| {
                         w.is_resizable().ok() == Some(false)
                             && w.is_maximizable().ok() == Some(false)
@@ -218,6 +279,7 @@ pub fn start_poll(app: &AppHandle) {
                     "timedOut":timed_out,
                     "runtimeSettingsReopened":reopened,
                     "trayPinRoundTrip":pin_round_trip,
+                    "monitorWindowRecreated":monitor_recreated,
                     "hudWindowLocked": app.get_webview_window("hud").is_some_and(|w|
                         w.is_resizable().ok() == Some(false)
                         && w.is_maximizable().ok() == Some(false)
