@@ -54,7 +54,7 @@ fn err() -> ApiError {
     )
 }
 fn json(root: &Path, file: &Path) -> Result<Value, ApiError> {
-    serde_json::from_slice(&cockpit::read_in_root(
+    cockpit::parse_json_slice(&cockpit::read_in_root(
         root,
         file,
         4 * 1024 * 1024,
@@ -523,5 +523,32 @@ mod tests {
             json!({"accounts":[{"platform":"anthropic","type":"apikey","name":"key","credentials":{"api_key":"synthetic-key"}}]}),
         );
         assert!(list_accounts(t.path()).unwrap().accounts.is_empty());
+    }
+    #[test]
+    fn antigravity_account_files_accept_utf8_bom() {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path();
+        std::fs::create_dir_all(root.join("accounts")).unwrap();
+        std::fs::write(
+            root.join("accounts.json"),
+            format!(
+                "\u{FEFF}{}",
+                json!({"accounts":[{"id":"a","email":"bom@example.test"}],"current_account_id":"a"})
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("accounts/a.json"),
+            format!(
+                "\u{FEFF}{}",
+                json!({"id":"a","token":{"access_token":"synthetic-bom-token","project_id":"test-project"}})
+            ),
+        )
+        .unwrap();
+        let accounts = list_accounts(root).unwrap().accounts;
+        assert_eq!(accounts.len(), 1);
+        let creds = read_credentials(root, &accounts[0].source_id).unwrap();
+        assert_eq!(creds.access_token, "synthetic-bom-token");
+        assert_eq!(creds.account_email.as_deref(), Some("bom@example.test"));
     }
 }

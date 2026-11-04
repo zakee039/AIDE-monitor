@@ -112,3 +112,13 @@ HUD 第一版只做标准 OAuth 用途：
 核对 Cockpit Tools main `76fbea02ba8ab5a071205a0bfa59ef4db5cc64b4`（v1.3.73）与 v1.3.69 的 Grok 变化。Grok 独立解析共享额度池与实际周/月周期，不把 `productUsage` 占比或统一计费账号的购买余额当作独立额度；请求版本采用该上游当前兜底 1.0.52。Antigravity 排除 `aicode-consumers` 占位项目，企业路由同时要求 GCP 标记和有效项目。
 
 Gemini 4 Argon 的独立周池字段 `gemini-argon-wtu-weekly` 核对自 [ClaudeBar 的直接接口解析](https://github.com/tddworks/ClaudeBar/blob/main/Modules/Providers/Resources/Providers/antigravity-usage.js)。本项目独立实现字段解析，未复制其实现。该池没有返回时显示未知，不能用 Gemini 3 的额度填充。Cockpit 当前前端仍以 Gemini／Claude 两类显示，不能以其页面分组推断全部服务端额度池。
+
+## 2026-11-04 Antigravity 配额刷新同步核对
+
+核对 Cockpit Tools main `13744acd`（v1.3.78）与 ClaudeBar main `6d3d5906`（v0.5.25，PR #668 `6f42b714`）：
+
+1. **云端 `User-Agent` 签名更新**：Google Cloud Code PA 在 `retrieveUserQuotaSummary` 接口上对客户端 `User-Agent` 增加了 `aidev_client` 格式校验；旧简写 UA 会导致服务端仅返回 3P Claude/GPT 桶而省略 Gemini 与 Gemini 4 Argon 池。同步更新云端请求 `User-Agent` 为 `antigravity/2.25.0 (aidev_client; os_type=windows; arch=amd64; cl=1003475615)`。
+2. **Argon 桶名变体与字段名兼容**：支持 `argon:weekly`、`gemini-argon-*`、`gemini-4-argon-*`、`argon-*` 归入 `gemini4` 额度池，同时兼容 `bucketId` / `id`、`remainingFraction` / `remaining_fraction`、`resetTime` / `reset_time` 字段。
+3. **缺失 `gemini-5h` 时的模型列表补充**：当云端 `retrieveUserQuotaSummary` 省略 `gemini-5h` 时，按需调用 `/v1internal:fetchAvailableModels` 从非内部、非 Argon 的 Gemini 模型 `quotaInfo` 中补充 `gemini-5h` 窗口，不伪造周额度或 Argon 额度。
+4. **账号文件 UTF-8 BOM 与本地命令行格式兼容**：支持读取带 UTF-8 BOM 的账号索引与详情 JSON，本地 Language Server 探测同时支持 `--csrf_token <token>` 与 `--csrf_token=<token>`。
+

@@ -458,20 +458,21 @@ fn read_csrf_token(pid: u32) -> Option<String> {
         CloseHandle(process);
 
         let cmdline = String::from_utf16_lossy(&buf);
-        let key = "--csrf_token";
-        if let Some(pos) = cmdline.find(key) {
-            let after = &cmdline[pos + key.len()..];
-            let token = after
-                .split_whitespace()
-                .next()
-                .unwrap_or("")
-                .trim_matches(|c: char| c == '"' || c == '\'');
-            if !token.is_empty() {
-                return Some(token.to_string());
-            }
-        }
-        None
+        extract_csrf_token_from_cmdline(&cmdline)
     }
+}
+
+fn extract_csrf_token_from_cmdline(cmdline: &str) -> Option<String> {
+    let key = "--csrf_token";
+    let pos = cmdline.find(key)?;
+    let after = &cmdline[pos + key.len()..];
+    let token = after
+        .trim_start_matches(|c: char| c.is_whitespace() || c == '=')
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim_matches(|c: char| c == '"' || c == '\'');
+    (!token.is_empty()).then(|| token.to_string())
 }
 
 #[cfg(windows)]
@@ -562,6 +563,22 @@ mod tests {
             &serde_json::json!({"userStatus":{"name":"alice@example.test"}}),
             "alice@example.test"
         ));
+    }
+
+    #[test]
+    fn csrf_token_extraction_supports_space_and_equals_separators() {
+        assert_eq!(
+            extract_csrf_token_from_cmdline("language_server.exe --csrf_token abc-123 --port 1234"),
+            Some("abc-123".into())
+        );
+        assert_eq!(
+            extract_csrf_token_from_cmdline("language_server.exe --csrf_token=\"def-456\" --port 1234"),
+            Some("def-456".into())
+        );
+        assert_eq!(
+            extract_csrf_token_from_cmdline("language_server.exe --port 1234"),
+            None
+        );
     }
 
     #[tokio::test]

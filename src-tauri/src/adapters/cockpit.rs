@@ -82,7 +82,7 @@ fn read_catalog(root: &Path) -> Result<SourceCatalog, ApiError> {
         MAX_JSON_BYTES,
         "SOURCE_NOT_FOUND",
     )?;
-    let index: Value = serde_json::from_slice(&bytes)
+    let index: Value = parse_json_slice(&bytes)
         .map_err(|_| ApiError::new("SOURCE_BUSY", "账号索引暂时无法读取，请稍后重试"))?;
     if index.get("version").and_then(Value::as_str) != Some("1.0") {
         return Err(unsupported_source());
@@ -248,9 +248,13 @@ fn credentials_from_detail(value: &Value, source_id: &str) -> Result<Credentials
 fn decode_detail(root: &Path, path: &Path) -> Result<Value, ApiError> {
     decode_provider(root, path, "codex")
 }
+pub(super) fn parse_json_slice(bytes: &[u8]) -> serde_json::Result<Value> {
+    serde_json::from_slice(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes))
+}
+
 pub(super) fn decode_provider(root: &Path, path: &Path, kind: &str) -> Result<Value, ApiError> {
     let bytes = read_in_root(root, path, MAX_JSON_BYTES, "IO_ERROR")?;
-    let document: Value = serde_json::from_slice(&bytes)
+    let document: Value = parse_json_slice(&bytes)
         .map_err(|_| ApiError::new("SOURCE_BUSY", "账号详情暂时无法读取，请稍后重试"))?;
     if !document.is_object() {
         return Err(unsupported_source());
@@ -300,7 +304,7 @@ pub(super) fn decode_provider(root: &Path, path: &Path, kind: &str) -> Result<Va
     if plaintext.len() > MAX_JSON_BYTES {
         return Err(decrypt_failed());
     }
-    serde_json::from_slice(&plaintext).map_err(|_| decrypt_failed())
+    parse_json_slice(&plaintext).map_err(|_| decrypt_failed())
 }
 
 fn safe_source_id(id: &str) -> bool {

@@ -7,7 +7,48 @@ use reqwest::{
 };
 use serde_json::{json, Value};
 
+const ANTIGRAVITY_USER_AGENT: &str =
+    "antigravity/2.25.0 (aidev_client; os_type=windows; arch=amd64; cl=1003475615)";
+
+fn antigravity_post(
+    client: &Client,
+    c: &Credentials,
+    method: &str,
+) -> Result<RequestBuilder, ApiError> {
+    let mut auth = HeaderValue::from_str(&format!("Bearer {}", c.access_token))
+        .map_err(|_| ApiError::new("AUTH_EXPIRED", "无效登录凭据"))?;
+    auth.set_sensitive(true);
+    let base = if c.gcp && valid_project(c.project_id.as_deref()).is_some() {
+        "https://cloudcode-pa.googleapis.com"
+    } else {
+        "https://daily-cloudcode-pa.googleapis.com"
+    };
+    Ok(client
+        .post(format!("{base}/v1internal:{method}"))
+        .json(
+            &valid_project(c.project_id.as_deref())
+                .map(|p| json!({"project":p}))
+                .unwrap_or(json!({})),
+        )
+        .header(AUTHORIZATION, auth)
+        .header("Accept", "application/json")
+        .header("User-Agent", ANTIGRAVITY_USER_AGENT))
+}
+
+pub fn antigravity_models_request(
+    client: &Client,
+    c: &Credentials,
+) -> Result<RequestBuilder, ApiError> {
+    if c.provider != "antigravity" {
+        return Err(ApiError::new("ACCOUNT_UNSUPPORTED", "不支持此平台"));
+    }
+    antigravity_post(client, c, "fetchAvailableModels")
+}
+
 pub fn request(client: &Client, c: &Credentials) -> Result<RequestBuilder, ApiError> {
+    if c.provider == "antigravity" {
+        return antigravity_post(client, c, "retrieveUserQuotaSummary");
+    }
     let mut auth = HeaderValue::from_str(&format!("Bearer {}", c.access_token))
         .map_err(|_| ApiError::new("AUTH_EXPIRED", "无效登录凭据"))?;
     auth.set_sensitive(true);
@@ -15,19 +56,6 @@ pub fn request(client: &Client, c: &Credentials) -> Result<RequestBuilder, ApiEr
         "claude" => client
             .get("https://api.anthropic.com/api/oauth/usage")
             .header("anthropic-beta", "oauth-2025-04-20"),
-        "antigravity" => client
-            .post(
-                if c.gcp && valid_project(c.project_id.as_deref()).is_some() {
-                    "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
-                } else {
-                    "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
-                },
-            )
-            .json(
-                &valid_project(c.project_id.as_deref())
-                    .map(|p| json!({"project":p}))
-                    .unwrap_or(json!({})),
-            ),
         "grok" => client
             .get("https://cli-chat-proxy.grok.com/v1/billing?format=credits")
             .header("x-xai-token-auth", "xai-grok-cli")
@@ -43,7 +71,6 @@ pub fn request(client: &Client, c: &Credentials) -> Result<RequestBuilder, ApiEr
         .header(
             "User-Agent",
             match c.provider.as_str() {
-                "antigravity" => "antigravity/2.25.0 windows/amd64",
                 "grok" => "grok-cli/1.0.52",
                 _ => concat!("AIDE-monitor/", env!("CARGO_PKG_VERSION")),
             },
@@ -164,6 +191,7 @@ fn antigravity_windows(v: &Value) -> Result<Vec<QuotaWindow>, ApiError> {
         }
         let Some(id) = b
             .get("bucketId")
+            .or_else(|| b.get("id"))
             .and_then(Value::as_str)
             .filter(|id| !id.is_empty() && id.len() <= 160 && !id.chars().any(char::is_control))
         else {
@@ -173,13 +201,20 @@ fn antigravity_windows(v: &Value) -> Result<Vec<QuotaWindow>, ApiError> {
         if duration.is_none() {
             duration = b
                 .get("durationSeconds")
+                .or_else(|| b.get("duration_seconds"))
                 .and_then(Value::as_u64)
                 .filter(|n| (1..=366 * 86400).contains(n));
         }
         let (family, label) = match root {
             "gemini" => ("gemini".to_owned(), "Gemini".to_owned()),
             "3p" | "claude" => ("claude".to_owned(), "Claude".to_owned()),
-            "gemini-argon-wtu" | "gemini-argon" | "gemini-4-argon" | "gemini-4" => {
+            "argon" | "gemini-argon-wtu" | "gemini-argon" | "gemini-4-argon" | "gemini-4" => {
+                ("gemini4".to_owned(), "Gemini 4".to_owned())
+            }
+            _ if root.starts_with("gemini-argon-")
+                || root.starts_with("gemini-4-argon-")
+                || root.starts_with("argon-") =>
+            {
                 ("gemini4".to_owned(), "Gemini 4".to_owned())
             }
             _ => (
@@ -222,14 +257,17 @@ fn antigravity_windows(v: &Value) -> Result<Vec<QuotaWindow>, ApiError> {
                 .map(|b| {
                     percent(
                         b.get("remainingFraction")
+                            .or_else(|| b.get("remaining_fraction"))
                             .and_then(number)
                             .map(|v| v * 100.),
                     )
                 })
                 .collect();
             let remaining = values.and_then(|v| v.into_iter().reduce(f64::min));
-            let dates: Option<Vec<String>> =
-                buckets.iter().map(|b| date(b.get("resetTime"))).collect();
+            let dates: Option<Vec<String>> = buckets
+                .iter()
+                .map(|b| date(b.get("resetTime").or_else(|| b.get("reset_time"))))
+                .collect();
             let reset = dates.and_then(|v| {
                 v.into_iter()
                     .max_by_key(|d| DateTime::parse_from_rfc3339(d).ok())
@@ -251,6 +289,69 @@ fn antigravity_windows(v: &Value) -> Result<Vec<QuotaWindow>, ApiError> {
             w
         })
         .collect())
+}
+
+/// When `retrieveUserQuotaSummary` omits the Gemini 5h pool, supplement `gemini-5h` from
+/// `fetchAvailableModels` without inventing weekly or Gemini 4 Argon windows.
+pub fn supplement_antigravity_models(quota: &mut AccountQuota, models_response: &Value) {
+    let Some(target) = quota
+        .windows
+        .iter_mut()
+        .find(|w| w.id == "gemini-5h" && w.remaining_percent.is_none())
+    else {
+        return;
+    };
+    let Some(models) = models_response
+        .get("models")
+        .or_else(|| models_response.pointer("/response/models"))
+        .and_then(Value::as_object)
+    else {
+        return;
+    };
+    let mut keys: Vec<&String> = models.keys().collect();
+    keys.sort();
+    for key in keys.into_iter().take(500) {
+        let Some(model) = models.get(key).filter(|m| m.is_object()) else {
+            continue;
+        };
+        if model.get("isInternal").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        let display_name = model
+            .get("displayName")
+            .and_then(Value::as_str)
+            .unwrap_or(key);
+        let key_lower = key.to_ascii_lowercase();
+        let name_lower = display_name.to_ascii_lowercase();
+        if (!key_lower.contains("gemini") && !name_lower.contains("gemini"))
+            || key_lower.contains("argon")
+            || name_lower.contains("argon")
+        {
+            continue;
+        }
+        let Some(info) = model
+            .get("quotaInfo")
+            .or_else(|| model.get("quota_info"))
+            .filter(|v| v.is_object())
+        else {
+            continue;
+        };
+        let Some(rem) = percent(
+            info.get("remainingFraction")
+                .or_else(|| info.get("remaining_fraction"))
+                .and_then(number)
+                .map(|v| v * 100.0),
+        ) else {
+            continue;
+        };
+        target.remaining_percent = Some(rem);
+        target.measurement = "percent".into();
+        target.exhausted = Some(rem == 0.0);
+        if target.resets_at.is_none() {
+            target.resets_at = date(info.get("resetTime").or_else(|| info.get("reset_time")));
+        }
+        break;
+    }
 }
 fn bucket_period(id: &str) -> (&str, &str, Option<u64>) {
     for (period, seconds) in [
@@ -669,7 +770,29 @@ mod tests {
             if p == "antigravity" {
                 assert_eq!(
                     r.headers()["user-agent"],
-                    "antigravity/2.25.0 windows/amd64"
+                    "antigravity/2.25.0 (aidev_client; os_type=windows; arch=amd64; cl=1003475615)"
+                );
+                let models_req = antigravity_models_request(
+                    &c,
+                    &Credentials {
+                        account_email: None,
+                        provider: p.into(),
+                        access_token: "secret-synthetic".into(),
+                        account_id: None,
+                        project_id: None,
+                        gcp: false,
+                    },
+                )
+                .unwrap()
+                .build()
+                .unwrap();
+                assert_eq!(
+                    models_req.url().as_str(),
+                    "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels"
+                );
+                assert_eq!(
+                    models_req.headers()["user-agent"],
+                    "antigravity/2.25.0 (aidev_client; os_type=windows; arch=amd64; cl=1003475615)"
                 );
             }
             assert!(!format!("{r:?}").contains("secret-synthetic"));
@@ -677,32 +800,83 @@ mod tests {
     }
     #[test]
     fn antigravity_parses_gemini4_argon_variants() {
-        let q = parse(
-            &json!({"groups":[
-                {"displayName":"Gemini Models","buckets":[
-                    {"bucketId":"gemini-weekly","remainingFraction":0.94,"resetTime":"2026-10-24T06:33:44Z"},
-                    {"bucketId":"gemini-5h","remainingFraction":0.95,"resetTime":"2026-10-22T11:20:20Z"}
-                ]},
-                {"displayName":"Claude and GPT models","buckets":[
-                    {"bucketId":"3p-weekly","remainingFraction":0.55,"resetTime":"2026-10-26T07:45:47Z"},
-                    {"bucketId":"3p-5h","remainingFraction":1.0,"resetTime":"2026-10-22T12:06:07Z"}
-                ]},
-                {"displayName":"Gemini 4 Argon","buckets":[
-                    {"bucketId":"gemini-argon-wtu-weekly","remainingFraction":0,"resetTime":"2026-10-27T10:17:34Z"}
-                ]}
-            ]}),
+        for bucket in [
+            json!({"bucketId":"gemini-argon-wtu-weekly","remainingFraction":0,"resetTime":"2026-10-27T10:17:34Z"}),
+            json!({"bucketId":"argon:weekly","remainingFraction":0,"resetTime":"2026-10-27T10:17:34Z"}),
+            json!({"bucketId":"gemini-argon-custom-weekly","remainingFraction":0,"resetTime":"2026-10-27T10:17:34Z"}),
+            json!({"id":"gemini-argon-wtu-weekly","remaining_fraction":0,"reset_time":"2026-10-27T10:17:34Z"}),
+        ] {
+            let q = parse(
+                &json!({"groups":[
+                    {"displayName":"Gemini Models","buckets":[
+                        {"bucketId":"gemini-weekly","remainingFraction":0.94,"resetTime":"2026-10-24T06:33:44Z"},
+                        {"bucketId":"gemini-5h","remainingFraction":0.95,"resetTime":"2026-10-22T11:20:20Z"}
+                    ]},
+                    {"displayName":"Claude and GPT models","buckets":[
+                        {"bucketId":"3p-weekly","remainingFraction":0.55,"resetTime":"2026-10-26T07:45:47Z"},
+                        {"bucketId":"3p-5h","remainingFraction":1.0,"resetTime":"2026-10-22T12:06:07Z"}
+                    ]},
+                    {"displayName":"Gemini 4 Argon","buckets":[bucket]}
+                ]}),
+                "antigravity",
+                "a",
+                Utc::now(),
+            )
+            .unwrap();
+            assert_eq!(q.windows.len(), 5);
+            let g4 = q.windows.iter().find(|w| w.id == "gemini4-weekly").unwrap();
+            assert_eq!(g4.remaining_percent, Some(0.0));
+            assert_eq!(g4.exhausted, Some(true));
+            assert_eq!(g4.duration_seconds, Some(604800));
+            assert_eq!(g4.scope, "feature:gemini4");
+            assert_eq!(g4.resets_at.as_deref(), Some("2026-10-27T10:17:34+00:00"));
+        }
+    }
+    #[test]
+    fn antigravity_supplements_missing_gemini_5h_from_models_list_only() {
+        let mut q = parse(
+            &json!({"groups":[{"displayName":"Claude and GPT models","buckets":[
+                {"bucketId":"3p-weekly","remainingFraction":0.48,"resetTime":"2026-11-07T07:55:38Z"},
+                {"bucketId":"3p-5h","remainingFraction":0.0,"resetTime":"2026-10-31T12:55:38Z"}
+            ]}]}),
             "antigravity",
             "a",
             Utc::now(),
         )
         .unwrap();
-        assert_eq!(q.windows.len(), 5);
-        let g4 = q.windows.iter().find(|w| w.id == "gemini4-weekly").unwrap();
-        assert_eq!(g4.remaining_percent, Some(0.0));
-        assert_eq!(g4.exhausted, Some(true));
-        assert_eq!(g4.duration_seconds, Some(604800));
-        assert_eq!(g4.scope, "feature:gemini4");
-        assert_eq!(g4.resets_at.as_deref(), Some("2026-10-27T10:17:34+00:00"));
+        assert_eq!(
+            q.windows
+                .iter()
+                .find(|w| w.id == "gemini-5h")
+                .unwrap()
+                .remaining_percent,
+            None
+        );
+        let models = json!({
+            "models": {
+                "a_internal_gemini": {"isInternal": true, "quotaInfo": {"remainingFraction": 0.1}},
+                "b_gemini_argon": {"displayName": "Gemini 4 Argon", "quotaInfo": {"remainingFraction": 0.2}},
+                "gemini-3-flash": {
+                    "displayName": "Gemini 3 Flash",
+                    "quotaInfo": {"remainingFraction": 0.95, "resetTime": "2026-10-31T12:46:31Z"}
+                }
+            }
+        });
+        supplement_antigravity_models(&mut q, &models);
+        let g5h = q.windows.iter().find(|w| w.id == "gemini-5h").unwrap();
+        assert_eq!(g5h.remaining_percent, Some(95.0));
+        assert_eq!(g5h.measurement, "percent");
+        assert_eq!(g5h.exhausted, Some(false));
+        assert_eq!(g5h.resets_at.as_deref(), Some("2026-10-31T12:46:31+00:00"));
+        assert_eq!(
+            q.windows
+                .iter()
+                .find(|w| w.id == "gemini-weekly")
+                .unwrap()
+                .remaining_percent,
+            None
+        );
+        assert!(q.windows.iter().all(|w| w.scope != "feature:gemini4"));
     }
     #[test]
     fn antigravity_parses_language_server_response_with_exhausted_argon() {

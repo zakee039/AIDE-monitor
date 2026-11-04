@@ -32,7 +32,23 @@ pub async fn fetch_quota(
     .send()
     .await
     .map_err(network_error)?;
-    read_provider_response(response, hud_account_id, &credentials.provider).await
+    let mut quota =
+        read_provider_response(response, hud_account_id, &credentials.provider).await?;
+    if credentials.provider == "antigravity"
+        && quota
+            .windows
+            .iter()
+            .any(|w| w.id == "gemini-5h" && w.remaining_percent.is_none())
+    {
+        if let Ok(req) = super::providers::antigravity_models_request(client, credentials) {
+            if let Ok(resp) = req.send().await {
+                if let Ok((models_val, _)) = read_json_body(resp).await {
+                    super::providers::supplement_antigravity_models(&mut quota, &models_val);
+                }
+            }
+        }
+    }
+    Ok(quota)
 }
 
 fn quota_request(client: &Client, credentials: &Credentials) -> Result<RequestBuilder, ApiError> {
@@ -64,11 +80,7 @@ async fn read_response(response: Response, hud_account_id: &str) -> Result<Accou
     read_provider_response(response, hud_account_id, "codex_usage").await
 }
 
-async fn read_provider_response(
-    response: Response,
-    hud_account_id: &str,
-    provider: &str,
-) -> Result<AccountQuota, ApiError> {
+async fn read_json_body(response: Response) -> Result<(Value, DateTime<Utc>), ApiError> {
     let observed_at = Utc::now();
     let status = response.status();
     if !status.is_success() {
@@ -91,6 +103,15 @@ async fn read_provider_response(
         bytes.extend_from_slice(&chunk);
     }
     let value: Value = serde_json::from_slice(&bytes).map_err(|_| unsupported_response())?;
+    Ok((value, observed_at))
+}
+
+async fn read_provider_response(
+    response: Response,
+    hud_account_id: &str,
+    provider: &str,
+) -> Result<AccountQuota, ApiError> {
+    let (value, observed_at) = read_json_body(response).await?;
     if provider == "codex_usage" {
         parse_usage(&value, hud_account_id, observed_at)
     } else {
