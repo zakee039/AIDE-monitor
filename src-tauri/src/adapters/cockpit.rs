@@ -7,11 +7,20 @@ use std::{
     fs::File,
     io::Read,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 const MAX_JSON_BYTES: usize = 1024 * 1024;
+const MAX_SQLITE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_KEY_BYTES: usize = 256;
 const MAX_SOURCE_ACCOUNTS: usize = 500;
+
+pub(super) struct SqliteAccountIndex {
+    pub version: Option<String>,
+    pub detail_schema: Option<u64>,
+    pub current_id: Option<String>,
+    pub entries: Vec<(String, Option<String>)>,
+}
 
 #[derive(Clone)]
 pub struct SourceAccount {
@@ -37,11 +46,15 @@ pub struct Credentials {
     pub(crate) account_id: Option<String>,
 }
 
+fn has_codex_index(root: &Path) -> bool {
+    root.join("codex_accounts.sqlite").is_file() || root.join("codex_accounts.json").is_file()
+}
+
 /// Discovery examines path existence only; account/key contents are read on explicit use.
 pub fn discover_root() -> Option<PathBuf> {
     if let Some(configured) = std::env::var_os("COCKPIT_TOOLS_DATA_DIR") {
         let root = PathBuf::from(configured);
-        if root.is_absolute() && root.join("codex_accounts.json").is_file() {
+        if root.is_absolute() && has_codex_index(&root) {
             return Some(root);
         }
         return None;
@@ -54,13 +67,22 @@ pub fn discover_root() -> Option<PathBuf> {
     ]
     .iter()
     .map(|name| PathBuf::from(&profile).join(name))
-    .find(|root| root.join("codex_accounts.json").is_file())
+    .find(|root| has_codex_index(root))
 }
 
 pub fn list_accounts(root: &Path) -> Result<SourceCatalog, ApiError> {
     let mut catalog = read_catalog(root)?;
+    let total = catalog.accounts.len();
+    let mut missing = 0usize;
     let mut login_accounts = Vec::new();
     for mut account in catalog.accounts {
+        let detail_path = root
+            .join("codex_accounts")
+            .join(format!("{}.json", account.source_id));
+        if !detail_path.exists() {
+            missing += 1;
+            continue;
+        }
         let value = read_detail(root, &account.source_id)?;
         match credentials_from_detail(&value, &account.source_id) {
             Ok(_) => account.support = "supported".into(),
@@ -71,11 +93,166 @@ pub fn list_accounts(root: &Path) -> Result<SourceCatalog, ApiError> {
         }
         login_accounts.push(account);
     }
+    if total > 0 && missing == total {
+        return Err(ApiError::new("IO_ERROR", "无法读取账号详情"));
+    }
     catalog.accounts = login_accounts;
     Ok(catalog)
 }
 
+pub(super) fn read_sqlite_index(
+    root: &Path,
+    filename: &str,
+) -> Result<SqliteAccountIndex, ApiError> {
+    let candidate = root.join(filename);
+    let resolved_root = root
+        .canonicalize()
+        .map_err(|_| ApiError::new("SOURCE_NOT_FOUND", "未找到可读取的 Cockpit 账号索引"))?;
+    let resolved_file = candidate
+        .canonicalize()
+        .map_err(|_| ApiError::new("SOURCE_NOT_FOUND", "未找到可读取的 Cockpit 账号索引"))?;
+    if !resolved_file.starts_with(&resolved_root) {
+        return Err(ApiError::new(
+            "SOURCE_UNSUPPORTED",
+            "账号文件必须位于所选来源目录内",
+        ));
+    }
+    let metadata = std::fs::metadata(&resolved_file)
+        .map_err(|_| ApiError::new("SOURCE_NOT_FOUND", "未找到可读取的 Cockpit 账号索引"))?;
+    if !metadata.is_file() || metadata.len() > MAX_SQLITE_BYTES {
+        return Err(ApiError::new(
+            "SOURCE_UNSUPPORTED",
+            "来源文件类型或大小不受支持",
+        ));
+    }
+    let db = rusqlite::Connection::open_with_flags(
+        &resolved_file,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|_| ApiError::new("SOURCE_BUSY", "账号索引暂时无法读取，请稍后重试"))?;
+    db.busy_timeout(Duration::from_millis(500))
+        .map_err(|_| ApiError::new("SOURCE_BUSY", "账号索引暂时无法读取，请稍后重试"))?;
+
+    let state_raw: Option<String> = match db.query_row(
+        "SELECT state FROM account_index_state WHERE singleton = 1",
+        [],
+        |row| row.get(0),
+    ) {
+        Ok(raw) => Some(raw),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(rusqlite::Error::SqliteFailure(_, Some(msg))) if msg.contains("no such table") => None,
+        Err(_) => {
+            return Err(ApiError::new(
+                "SOURCE_BUSY",
+                "账号索引暂时无法读取，请稍后重试",
+            ))
+        }
+    };
+
+    let mut active_source: i64 = 0;
+    let mut version = None;
+    let mut detail_schema = None;
+    let mut current_id = None;
+    if let Some(raw) = state_raw {
+        let state: Value = parse_json_slice(raw.as_bytes())
+            .map_err(|_| ApiError::new("SOURCE_BUSY", "账号索引暂时无法读取，请稍后重试"))?;
+        if state.get("complete").and_then(Value::as_bool) == Some(false) {
+            return Err(ApiError::new(
+                "SOURCE_BUSY",
+                "账号索引正在更新中，请稍后重试",
+            ));
+        }
+        if let Some(source) = state.get("source").and_then(Value::as_i64) {
+            active_source = source;
+        }
+        version = state
+            .get("version")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        detail_schema = state.get("detail_schema").and_then(Value::as_u64);
+        current_id = state
+            .get("current_id")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+    }
+
+    let mut stmt = db
+        .prepare(
+            "SELECT account_id, email FROM summaries WHERE source = ?1 ORDER BY position ASC LIMIT 501",
+        )
+        .map_err(|_| unsupported_source())?;
+    let rows = stmt
+        .query_map([active_source], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+            ))
+        })
+        .map_err(|_| ApiError::new("SOURCE_BUSY", "账号索引暂时无法读取，请稍后重试"))?;
+
+    let mut seen = HashSet::new();
+    let mut entries = Vec::new();
+    for row in rows {
+        let (id, email) = row
+            .map_err(|_| ApiError::new("SOURCE_BUSY", "账号索引暂时无法读取，请稍后重试"))?;
+        if entries.len() >= MAX_SOURCE_ACCOUNTS {
+            return Err(ApiError::new(
+                "SOURCE_UNSUPPORTED",
+                "账号索引超出当前版本支持的大小",
+            ));
+        }
+        if !safe_source_id(&id) || !seen.insert(id.clone()) {
+            return Err(unsupported_source());
+        }
+        let email = email
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty() && value.len() <= 320);
+        entries.push((id, email));
+    }
+
+    Ok(SqliteAccountIndex {
+        version,
+        detail_schema,
+        current_id,
+        entries,
+    })
+}
+
 fn read_catalog(root: &Path) -> Result<SourceCatalog, ApiError> {
+    if root.join("codex_accounts.sqlite").is_file() {
+        let index = read_sqlite_index(root, "codex_accounts.sqlite")?;
+        if let Some(version) = index.version.as_deref().filter(|v| !v.is_empty()) {
+            if version != "1.0" {
+                return Err(unsupported_source());
+            }
+        }
+        if let Some(schema) = index.detail_schema {
+            if schema > 2 {
+                return Err(unsupported_source());
+            }
+        }
+        let accounts = index
+            .entries
+            .into_iter()
+            .enumerate()
+            .map(|(order, (id, email))| {
+                let is_current = index.current_id.as_deref() == Some(id.as_str());
+                let name = email.unwrap_or_else(|| format!("账号 {}", order + 1));
+                SourceAccount {
+                    provider_id: "codex_usage".into(),
+                    source_id: id,
+                    display_name: name,
+                    support: "unknown".into(),
+                    is_current,
+                }
+            })
+            .collect();
+        return Ok(SourceCatalog {
+            accounts,
+            format: "unknown".into(),
+        });
+    }
     let bytes = read_in_root(
         root,
         &root.join("codex_accounts.json"),
@@ -92,6 +269,10 @@ fn read_catalog(root: &Path) -> Result<SourceCatalog, ApiError> {
             return Err(unsupported_source());
         }
     }
+    let current_id = index
+        .get("current_account_id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
     let entries = index
         .get("accounts")
         .and_then(Value::as_array)
@@ -124,7 +305,7 @@ fn read_catalog(root: &Path) -> Result<SourceCatalog, ApiError> {
             source_id: id.to_owned(),
             display_name: name,
             support: "unknown".into(),
-            is_current: false,
+            is_current: current_id == Some(id),
         });
     }
     // Index schema alone cannot establish whether individual details are encrypted or mixed.
@@ -612,5 +793,112 @@ mod tests {
                 .code,
             "SOURCE_UNSUPPORTED"
         );
+    }
+
+    #[test]
+    fn sqlite_index_takes_precedence_over_stale_json_and_stays_read_only() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("codex_accounts")).unwrap();
+        // Stale JSON index pointing to a deleted account.
+        fs::write(
+            dir.path().join("codex_accounts.json"),
+            json!({
+                "version": "1.0",
+                "detail_schema_version": 2,
+                "accounts": [{"id": "deleted-stale-account", "email": "stale@example.test"}]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let db_path = dir.path().join("codex_accounts.sqlite");
+        let db = rusqlite::Connection::open(&db_path).unwrap();
+        db.execute_batch(
+            "CREATE TABLE summaries (
+                source INTEGER NOT NULL, position INTEGER NOT NULL,
+                account_id TEXT NOT NULL, email TEXT NOT NULL, name TEXT,
+                created_at INTEGER NOT NULL, last_used INTEGER NOT NULL,
+                plan_type TEXT, subscription_active_until TEXT,
+                provider_login TEXT, provider_user_id TEXT, payload TEXT,
+                PRIMARY KEY(source, position)
+            );
+            CREATE TABLE account_index_state (
+                singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                state TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO account_index_state VALUES (1, ?1)",
+            [json!({
+                "source": 1,
+                "version": "1.0",
+                "current_id": "synthetic-account",
+                "detail_schema": 2,
+                "complete": true
+            })
+            .to_string()],
+        )
+        .unwrap();
+        // Inactive snapshot (source=0) must be ignored.
+        db.execute(
+            "INSERT INTO summaries (source, position, account_id, email, created_at, last_used) VALUES (0, 0, 'old-snapshot', 'old@example.test', 1, 1)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO summaries (source, position, account_id, email, created_at, last_used) VALUES (1, 0, 'synthetic-apikey', 'key@example.test', 1, 1)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO summaries (source, position, account_id, email, created_at, last_used) VALUES (1, 1, 'synthetic-account', 'live@example.test', 1, 1)",
+            [],
+        )
+        .unwrap();
+        drop(db);
+
+        let mut apikey_doc = detail();
+        apikey_doc["id"] = json!("synthetic-apikey");
+        apikey_doc["auth_mode"] = json!("apikey");
+        fs::write(
+            dir.path().join("codex_accounts/synthetic-apikey.json"),
+            apikey_doc.to_string(),
+        )
+        .unwrap();
+        fs::write(detail_path(&dir), detail().to_string()).unwrap();
+
+        let before = hashes(&dir);
+        let catalog = list_accounts(dir.path()).unwrap();
+        assert_eq!(catalog.accounts.len(), 1);
+        assert_eq!(catalog.accounts[0].source_id, "synthetic-account");
+        assert_eq!(catalog.accounts[0].display_name, "live@example.test");
+        assert!(catalog.accounts[0].is_current);
+        let creds = read_credentials(dir.path(), "synthetic-account").unwrap();
+        assert_eq!(creds.access_token, "synthetic-access-token");
+        assert_eq!(before, hashes(&dir));
+    }
+
+    #[test]
+    fn stale_missing_detail_entry_is_skipped_when_other_details_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("codex_accounts")).unwrap();
+        fs::write(
+            dir.path().join("codex_accounts.json"),
+            json!({
+                "version": "1.0",
+                "detail_schema_version": 2,
+                "accounts": [
+                    {"id": "deleted-account", "email": "gone@example.test"},
+                    {"id": "synthetic-account", "email": "live@example.test"}
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(detail_path(&dir), detail().to_string()).unwrap();
+
+        let catalog = list_accounts(dir.path()).unwrap();
+        assert_eq!(catalog.accounts.len(), 1);
+        assert_eq!(catalog.accounts[0].source_id, "synthetic-account");
     }
 }

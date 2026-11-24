@@ -12,6 +12,8 @@ use std::{
 pub struct Config {
     pub ratio_learning: HashMap<String, crate::quota_learning::Learner>,
     pub discovered_pools: HashMap<String, Vec<crate::model::PoolOption>>,
+    #[serde(default)]
+    pub dynamic_pools_v3: bool,
     pub config_version: u32,
     pub settings: Settings,
     pub sources: Vec<crate::adapters::sources::SourceOption>,
@@ -26,6 +28,7 @@ impl Default for Config {
         Self {
             ratio_learning: HashMap::new(),
             discovered_pools: HashMap::new(),
+            dynamic_pools_v3: false,
             config_version: 1,
             settings: Settings::default(),
             source_path: None,
@@ -61,6 +64,30 @@ pub fn load(path: &Path) -> Result<Config, ApiError> {
     if !crate::usb_display::valid_settings(&config.settings.usb_display) {
         config.settings.usb_display.custom_themes.clear();
         config.settings.usb_display.theme_id = "usb-mint".into();
+    }
+    // Older builds persisted hardcoded Antigravity pool labels (`Gemini 3`, `Claude`, `Gemini 4`).
+    // Drop those legacy static entries once so live refreshes populate the server's original names.
+    if !config.dynamic_pools_v3 {
+        let legacy_static = |p: &crate::model::PoolOption| {
+            matches!(
+                (p.id.as_str(), p.label.as_str()),
+                ("gemini3", "Gemini 3") | ("claude", "Claude") | ("gemini4", "Gemini 4")
+            )
+        };
+        config.discovered_pools.retain(|_, pools| {
+            pools.retain(|p| !legacy_static(p));
+            !pools.is_empty()
+        });
+        let selected = &config.selected_ids;
+        config.settings.account_pools.retain(|id, choices| {
+            choices.retain(|pool| pool != "gemini4");
+            !choices.is_empty() && selected.contains(id)
+        });
+        config
+            .settings
+            .pool_aliases
+            .retain(|key, _| !key.ends_with("::pool:gemini4"));
+        config.dynamic_pools_v3 = true;
     }
     Ok(config)
 }
@@ -163,5 +190,63 @@ mod tests {
         fs::write(&path, b"invalid").unwrap();
         assert!(load(&path).is_err());
         assert_eq!(fs::read(&path).unwrap(), b"invalid");
+    }
+
+    #[test]
+    fn legacy_static_pools_are_pruned_once_while_dynamic_v3_is_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut legacy = serde_json::to_value(Config::default()).unwrap();
+        legacy.as_object_mut().unwrap().remove("dynamicPoolsV3");
+        legacy["selectedIds"] = serde_json::json!(["acc"]);
+        legacy["discoveredPools"] = serde_json::json!({
+            "acc": [
+                {"id": "gemini3", "label": "Gemini 3"},
+                {"id": "claude", "label": "Claude"},
+                {"id": "gemini4", "label": "Gemini 4"}
+            ]
+        });
+        legacy["settings"]["accountPools"] = serde_json::json!({
+            "acc": ["claude", "gemini4"],
+            "only4": ["gemini4"],
+            "unselected": ["claude"]
+        });
+        legacy["settings"]["poolAliases"] = serde_json::json!({
+            "acc::pool:gemini4": "Argon",
+            "acc::pool:claude": "C"
+        });
+        atomic_json(&path, &legacy).unwrap();
+        let loaded = load(&path).unwrap();
+        assert!(loaded.dynamic_pools_v3);
+        assert!(!loaded.discovered_pools.contains_key("acc"));
+        assert_eq!(loaded.settings.account_pools["acc"], ["claude"]);
+        assert!(!loaded.settings.account_pools.contains_key("only4"));
+        assert!(!loaded.settings.account_pools.contains_key("unselected"));
+        assert!(!loaded.settings.pool_aliases.contains_key("acc::pool:gemini4"));
+        assert_eq!(loaded.settings.pool_aliases["acc::pool:claude"], "C");
+
+        // Dynamic v3 configs keep server-returned original names across restarts.
+        let mut v3 = loaded;
+        v3.discovered_pools.insert(
+            "acc".into(),
+            vec![
+                crate::model::PoolOption {
+                    id: "gemini3".into(),
+                    label: "Gemini Models".into(),
+                },
+                crate::model::PoolOption {
+                    id: "claude".into(),
+                    label: "Claude and GPT models".into(),
+                },
+            ],
+        );
+        atomic_json(&path, &v3).unwrap();
+        let reloaded = load(&path).unwrap();
+        assert_eq!(reloaded.discovered_pools["acc"].len(), 2);
+        assert_eq!(reloaded.discovered_pools["acc"][0].label, "Gemini Models");
+        assert_eq!(
+            reloaded.discovered_pools["acc"][1].label,
+            "Claude and GPT models"
+        );
     }
 }

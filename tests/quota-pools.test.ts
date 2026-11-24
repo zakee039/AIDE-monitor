@@ -4,12 +4,22 @@ import { displayCount, selectedPools, poolOptions, accountPoolOptions } from "..
 import { displayWindows } from "../src/monitor-display.ts";
 import type { AccountSummary, AccountQuota } from "../contracts/hud-api.ts";
 
-const google = { id: "g", providerId: "antigravity", displayName: "Google", selected: true, order: 0, support: "supported" } as AccountSummary;
-test("pool count follows selected display entries and preserves old account defaults", () => {
-  const accounts = [google, { ...google, id: "x", providerId: "grok" }, { ...google, id: "c", providerId: "codex" }];
+const google = {
+  id: "g",
+  providerId: "antigravity",
+  displayName: "Google",
+  selected: true,
+  order: 0,
+  support: "supported",
+  pools: [{ id: "gemini3", label: "Gemini Models" }, { id: "claude", label: "Claude and GPT models" }],
+} as AccountSummary;
+test("pool count follows selected display entries and preserves dynamic defaults", () => {
+  const accounts = [google, { ...google, id: "x", providerId: "grok", pools: undefined }, { ...google, id: "c", providerId: "codex", pools: undefined }];
+  assert.deepEqual(poolOptions("antigravity"), []);
   assert.deepEqual(selectedPools(google, {}), ["gemini3"]);
-  assert.equal(displayCount(accounts, ["g", "x", "c"], { g: ["gemini3", "claude", "gemini4"] }), 5);
-  assert.equal(displayCount(accounts, ["x", "c"], { g: ["gemini3", "claude", "gemini4"] }), 2);
+  assert.deepEqual(selectedPools(google, { g: ["gemini4"] }), ["gemini3"]);
+  assert.equal(displayCount(accounts, ["g", "x", "c"], { g: ["gemini3", "claude"] }), 4);
+  assert.equal(displayCount(accounts, ["x", "c"], { g: ["gemini3", "claude"] }), 2);
   assert.equal(displayCount(accounts, ["g"], { g: [] }), 0);
   assert.deepEqual(poolOptions("grok").map(p => p.id), ["shared"]);
 });

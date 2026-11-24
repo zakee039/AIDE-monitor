@@ -57,14 +57,14 @@ pub struct Service {
 }
 
 fn update_reset_backoff(d: &mut Data, id: &str, quota: &AccountQuota, now: DateTime<Utc>) {
-    let provider = d
+    let (provider, pools) = d
         .accounts
         .iter()
         .find(|a| a.summary.id == id)
-        .map(|a| a.summary.provider_id.as_str())
-        .unwrap_or("");
+        .map(|a| (a.summary.provider_id.as_str(), a.summary.pools.as_slice()))
+        .unwrap_or(("", &[]));
     let past_reset = quota.windows.iter().any(|w| {
-        crate::quota_pools::tracks_window(provider, id, &d.config.settings.account_pools, w)
+        crate::quota_pools::tracks_window(provider, id, pools, &d.config.settings.account_pools, w)
             && w.resets_at
                 .as_deref()
                 .is_some_and(|t| DateTime::parse_from_rfc3339(t).is_ok_and(|t| t <= now))
@@ -86,6 +86,7 @@ impl Service {
     pub fn new(data_dir: PathBuf, app: Option<AppHandle>) -> Result<Self, ApiError> {
         let config_path = data_dir.join("settings.json");
         let mut config = config::load(&config_path)?;
+        config.dynamic_pools_v3 = true;
         if config.source_path.is_none() && !cfg!(test) {
             config.source_path = cockpit::discover_root()
         }
@@ -139,17 +140,49 @@ impl Service {
         service.rescan()?;
         Ok(service)
     }
-    fn observe_quota(&self, d: &mut Data, id: &str, quota: &AccountQuota) {
+    fn observe_quota(&self, d: &mut Data, id: &str, quota: &AccountQuota) -> (bool, bool) {
+        let mut pools_changed = false;
+        let mut settings_changed = false;
         if let Some(account) = d.accounts.iter_mut().find(|a| a.summary.id == id) {
-            account.summary.pools = crate::quota_pools::catalog(
+            let previous_pools = account.summary.pools.clone();
+            let next_pools = crate::quota_pools::catalog(
                 &account.summary.provider_id,
                 &quota.windows,
-                &account.summary.pools,
+                if quota.windows.is_empty() {
+                    &account.summary.pools
+                } else {
+                    &[]
+                },
             );
+            pools_changed = next_pools != previous_pools;
+            account.summary.pools = next_pools;
             let summary = account.summary.clone();
+            d.config.dynamic_pools_v3 = true;
             d.config
                 .discovered_pools
                 .insert(id.into(), summary.pools.clone());
+            if let Some(selected) = d.config.settings.account_pools.get_mut(id) {
+                let before = selected.clone();
+                selected.retain(|pool| summary.pools.iter().any(|p| p.id == *pool));
+                if selected.is_empty() {
+                    d.config.settings.account_pools.remove(id);
+                    settings_changed = true;
+                } else if *selected != before {
+                    settings_changed = true;
+                }
+            }
+            let prefix = format!("{id}::pool:");
+            let alias_count = d.config.settings.pool_aliases.len();
+            d.config.settings.pool_aliases.retain(|key, _| {
+                key.strip_prefix(&prefix)
+                    .map_or(true, |pool| summary.pools.iter().any(|p| p.id == pool))
+            });
+            if d.config.settings.pool_aliases.len() != alias_count {
+                settings_changed = true;
+            }
+            if settings_changed {
+                d.config.settings.settings_revision += 1;
+            }
             let choices = std::collections::BTreeMap::from([(
                 id.to_owned(),
                 summary.pools.iter().map(|p| p.id.clone()).collect(),
@@ -167,6 +200,7 @@ impl Service {
             d.config.bound_learning_history();
             let _ = self.save(&d.config);
         }
+        (pools_changed, settings_changed)
     }
     pub fn envelope<T: Serialize>(&self, result: Result<T, ApiError>) -> ApiResult<T> {
         let revision = self.data.lock().map(|d| d.revision).unwrap_or(0);
@@ -456,7 +490,11 @@ impl Service {
         }
         let mut options = cockpit::defaults();
         if let Some(path) = &d.config.source_path {
-            let kind = if path.join("codex_accounts.json").exists()
+            let kind = if path.join("codex_accounts.sqlite").exists()
+                || path.join("antigravity_accounts.sqlite").exists()
+                || path.join("claude_accounts.sqlite").exists()
+                || path.join("grok_accounts.sqlite").exists()
+                || path.join("codex_accounts.json").exists()
                 || path.join("accounts.json").exists()
             {
                 "cockpit"
@@ -793,6 +831,11 @@ impl Service {
                     &account.summary.pools,
                 );
                 if allowed.is_empty()
+                    && d.config.settings.account_pools.get(id) == Some(choices)
+                {
+                    continue;
+                }
+                if allowed.is_empty()
                     || choices.len() > allowed.len()
                     || choices.iter().collect::<HashSet<_>>().len() != choices.len()
                     || choices
@@ -809,17 +852,21 @@ impl Service {
                 let Some((source, pool)) = id.split_once("::pool:") else {
                     return Err(ApiError::new("INVALID_ARGUMENT", "额度池名称无效"));
                 };
-                let valid_pool = d
-                    .accounts
-                    .iter()
-                    .find(|a| a.summary.id == source)
-                    .is_some_and(|a| {
-                        crate::quota_pools::catalog(&a.summary.provider_id, &[], &a.summary.pools)
-                            .iter()
-                            .any(|p| p.id == pool)
-                    });
-                if !valid_pool || alias.chars().count() > 80 || alias.chars().any(char::is_control)
-                {
+                if alias.chars().count() > 80 || alias.chars().any(char::is_control) {
+                    return Err(ApiError::new("INVALID_ARGUMENT", "额度池名称无效"));
+                }
+                let Some(account) = d.accounts.iter().find(|a| a.summary.id == source) else {
+                    return Err(ApiError::new("INVALID_ARGUMENT", "额度池名称无效"));
+                };
+                let allowed = crate::quota_pools::catalog(
+                    &account.summary.provider_id,
+                    &[],
+                    &account.summary.pools,
+                );
+                if allowed.is_empty() && d.config.settings.pool_aliases.get(id) == Some(alias) {
+                    continue;
+                }
+                if !allowed.iter().any(|p| p.id == pool) {
                     return Err(ApiError::new("INVALID_ARGUMENT", "额度池名称无效"));
                 }
             }
@@ -839,9 +886,10 @@ impl Service {
             {
                 1
             } else {
-                crate::quota_pools::selected(
+                crate::quota_pools::selected_for_pools(
                     &account.summary.provider_id,
                     id,
+                    &account.summary.pools,
                     &config.settings.account_pools,
                 )
                 .len()
@@ -1365,6 +1413,8 @@ impl Service {
         d.in_flight.remove(&id);
         let succeeded = result.is_ok();
         let error = result.as_ref().err().cloned();
+        let mut pools_changed = false;
+        let mut settings_changed = false;
         match result {
             Ok(mut quota) => {
                 let interval = d
@@ -1373,7 +1423,10 @@ impl Service {
                     .account_interval(&id)
                     .unwrap_or(d.config.settings.refresh_interval_seconds);
                 domain::update_freshness(&mut quota, now, interval);
-                self.observe_quota(&mut d, &id, &quota);
+                let (observed_pools_changed, observed_settings_changed) =
+                    self.observe_quota(&mut d, &id, &quota);
+                pools_changed = observed_pools_changed;
+                settings_changed = observed_settings_changed;
                 if let Some(previous) = d.quotas.get(&id) {
                     crate::quota_history::retain_missing(&mut quota, previous);
                 }
@@ -1454,6 +1507,12 @@ impl Service {
             }
         }
         drop(d);
+        if settings_changed {
+            self.event("settings.changed", None);
+        }
+        if pools_changed {
+            self.event("source.changed", None);
+        }
         self.event("snapshot.changed", None);
         self.event(
             if finished {
@@ -1492,20 +1551,30 @@ impl Service {
         d.last_tick = Instant::now();
         d.last_wall = now;
         let refresh_settings = d.config.settings.clone();
-        let providers: HashMap<String, String> = d
+        let providers: HashMap<String, (String, Vec<PoolOption>)> = d
             .accounts
             .iter()
-            .map(|a| (a.summary.id.clone(), a.summary.provider_id.clone()))
+            .map(|a| {
+                (
+                    a.summary.id.clone(),
+                    (a.summary.provider_id.clone(), a.summary.pools.clone()),
+                )
+            })
             .collect();
         for (id, quota) in &mut d.quotas {
             let interval = refresh_settings.account_interval(id).unwrap_or(interval);
             let old = quota.freshness.clone();
             domain::update_freshness(quota, now, interval);
             changed |= old != quota.freshness;
+            let (provider, pools) = providers
+                .get(id)
+                .map(|(p, pools)| (p.as_str(), pools.as_slice()))
+                .unwrap_or(("", &[]));
             for window in &quota.windows {
                 if crate::quota_pools::tracks_window(
-                    providers.get(id).map(String::as_str).unwrap_or(""),
+                    provider,
                     id,
+                    pools,
                     &refresh_settings.account_pools,
                     window,
                 ) {
@@ -1883,6 +1952,31 @@ mod tests {
                 .unwrap(),
             )
         };
+        // Before discovery, Antigravity has no hardcoded pools.
+        assert!(save(vec!["gemini3", "claude"]).is_err());
+        let with_argon = crate::adapters::providers::parse(
+            &json!({"groups":[
+                {"displayName":"Gemini Models","buckets":[{"bucketId":"gemini-5h","remainingFraction":0.8}]},
+                {"displayName":"Claude and GPT models","buckets":[{"bucketId":"3p-5h","remainingFraction":0.7}]},
+                {"displayName":"Gemini 4 Argon","buckets":[{"bucketId":"gemini-argon-wtu-weekly","remainingFraction":0.6}]}
+            ]}),
+            "antigravity",
+            &id,
+            Utc::now(),
+        )
+        .unwrap();
+        {
+            let mut d = service.data.lock().unwrap();
+            service.observe_quota(&mut d, &id, &with_argon);
+        }
+        assert_eq!(
+            service.accounts(true)[0]
+                .pools
+                .iter()
+                .map(|p| p.label.as_str())
+                .collect::<Vec<_>>(),
+            ["Gemini Models", "Claude and GPT models", "Gemini 4 Argon"]
+        );
         assert!(save(vec!["gemini3", "claude", "gemini4"]).is_ok());
         let snapshot = service.snapshot();
         assert_eq!(snapshot.accounts.len(), 3);
@@ -1910,10 +2004,34 @@ mod tests {
             assert!(save(choices).is_err());
         }
         assert_eq!(service.snapshot().accounts.len(), 3);
+        // Once the server merges Argon back into Gemini, gemini4 is removed dynamically.
+        let without_argon = crate::adapters::providers::parse(
+            &json!({"groups":[
+                {"displayName":"Gemini Models","buckets":[{"bucketId":"gemini-5h","remainingFraction":0.8}]},
+                {"displayName":"Claude and GPT models","buckets":[{"bucketId":"3p-5h","remainingFraction":0.7}]}
+            ]}),
+            "antigravity",
+            &id,
+            Utc::now(),
+        )
+        .unwrap();
+        {
+            let mut d = service.data.lock().unwrap();
+            service.observe_quota(&mut d, &id, &without_argon);
+        }
+        assert_eq!(
+            service.accounts(true)[0]
+                .pools
+                .iter()
+                .map(|p| p.id.as_str())
+                .collect::<Vec<_>>(),
+            ["gemini3", "claude"]
+        );
+        assert_eq!(service.snapshot().accounts.len(), 2);
         assert!(save(vec!["claude"]).is_ok());
         assert!(service.snapshot().accounts[0]
             .display_name
-            .ends_with("-claude"));
+            .ends_with("-Claude and GPT models"));
         assert_eq!(service.accounts(true).len(), 1);
     }
 
@@ -1923,7 +2041,16 @@ mod tests {
         {
             let mut d = service.data.lock().unwrap();
             d.accounts[0].summary.provider_id = "antigravity".into();
-            d.accounts[0].summary.pools = crate::quota_pools::catalog("antigravity", &[], &[]);
+            d.accounts[0].summary.pools = vec![
+                PoolOption {
+                    id: "gemini3".into(),
+                    label: "Gemini Models".into(),
+                },
+                PoolOption {
+                    id: "claude".into(),
+                    label: "Claude and GPT models".into(),
+                },
+            ];
         }
         let pool_id = format!("{id}::pool:claude");
         let settings = service.select_accounts(serde_json::from_value(json!({
@@ -1959,11 +2086,41 @@ mod tests {
             settings.settings_revision
         );
         service.select_accounts(serde_json::from_value(json!({
-            "expectedRevision":settings.settings_revision,"accountIds":[id],"poolAliases":{pool_id:"  "}
+            "expectedRevision":settings.settings_revision,"accountIds":[id.clone()],"poolAliases":{pool_id.clone():"  "}
         })).unwrap()).unwrap();
         assert_eq!(
             service.snapshot().accounts[0].display_name,
-            "My account-claude"
+            "My account-Claude and GPT models"
+        );
+        // Existing saved pool aliases on an undiscovered account must not block renaming another account.
+        {
+            let mut d = service.data.lock().unwrap();
+            let mut undiscovered = d.accounts[0].clone();
+            undiscovered.summary.id = "undiscovered".into();
+            undiscovered.summary.pools.clear();
+            d.accounts.push(undiscovered);
+            d.config
+                .settings
+                .pool_aliases
+                .insert("undiscovered::pool:claude".into(), "opus".into());
+        }
+        let next_rev = service.settings().settings_revision;
+        service
+            .select_accounts(
+                serde_json::from_value(json!({
+                    "expectedRevision": next_rev,
+                    "accountIds": [id],
+                    "poolAliases": {
+                        "undiscovered::pool:claude": "opus",
+                        pool_id: "others"
+                    }
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            service.snapshot().accounts[0].display_name,
+            "My account-others"
         );
     }
 

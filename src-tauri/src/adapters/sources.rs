@@ -155,57 +155,97 @@ fn record(id: String, p: &str, v: Value, name: Option<&str>, current: bool) -> O
 fn records(root: &Path) -> Result<Vec<Record>, ApiError> {
     let mut out = vec![];
     let mut recognized = false;
-    for (p, index, folder, kind) in [
+    for (p, sqlite_index, json_index, folder, kind) in [
         (
             "claude",
+            "claude_accounts.sqlite",
             "claude_accounts.json",
             "claude_accounts",
             "claude",
         ),
-        ("grok", "grok_accounts.json", "grok_accounts", "grok"),
-        ("antigravity", "accounts.json", "accounts", "antigravity"),
+        (
+            "grok",
+            "grok_accounts.sqlite",
+            "grok_accounts.json",
+            "grok_accounts",
+            "grok",
+        ),
+        (
+            "antigravity",
+            "antigravity_accounts.sqlite",
+            "accounts.json",
+            "accounts",
+            "antigravity",
+        ),
     ] {
-        if !root.join(index).is_file() {
-            continue;
-        }
-        recognized = true;
-        let v = json(root, &root.join(index))?;
-        let entries = v
-            .get("accounts")
-            .and_then(Value::as_array)
-            .ok_or_else(err)?;
-        if entries.len() > 500 {
-            return Err(err());
-        }
-        for e in entries {
-            let id = e
-                .get("id")
-                .and_then(Value::as_str)
-                .filter(|s| safe(s))
-                .ok_or_else(err)?;
-            let detail = cockpit::decode_provider(
-                root,
-                &root.join(folder).join(format!("{id}.json")),
-                kind,
-            )?;
-            if detail.get("id").and_then(Value::as_str) != Some(id) {
+        let (entries, current_id): (Vec<(String, Option<String>)>, Option<String>) =
+            if root.join(sqlite_index).is_file() {
+                recognized = true;
+                let index = cockpit::read_sqlite_index(root, sqlite_index)?;
+                (index.entries, index.current_id)
+            } else if root.join(json_index).is_file() {
+                recognized = true;
+                let v = json(root, &root.join(json_index))?;
+                let raw_entries = v
+                    .get("accounts")
+                    .and_then(Value::as_array)
+                    .ok_or_else(err)?;
+                if raw_entries.len() > 500 {
+                    return Err(err());
+                }
+                let mut parsed = Vec::with_capacity(raw_entries.len());
+                for e in raw_entries {
+                    let id = e
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .filter(|s| safe(s))
+                        .ok_or_else(err)?
+                        .to_owned();
+                    let email = e
+                        .get("email")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    parsed.push((id, email));
+                }
+                (
+                    parsed,
+                    v.get("current_account_id")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                )
+            } else {
+                continue;
+            };
+        let total = entries.len();
+        let mut missing = 0usize;
+        for (id, email) in entries {
+            let detail_path = root.join(folder).join(format!("{id}.json"));
+            if !detail_path.exists() {
+                missing += 1;
+                continue;
+            }
+            let detail = cockpit::decode_provider(root, &detail_path, kind)?;
+            if detail.get("id").and_then(Value::as_str) != Some(id.as_str()) {
                 return Err(err());
             }
             if let Some(mut r) = record(
                 format!("{p}:{id}"),
                 p,
                 detail,
-                e.get("email").and_then(Value::as_str),
-                v.get("current_account_id").and_then(Value::as_str) == Some(id),
+                email.as_deref(),
+                current_id.as_deref() == Some(id.as_str()),
             ) {
                 // This is the account index identity, not an editable HUD alias or export name.
                 if let Some(credentials) = r.credentials.as_mut() {
                     if credentials.account_email.is_none() {
-                        credentials.account_email = e.get("email").and_then(Value::as_str).map(str::to_owned);
+                        credentials.account_email = email;
                     }
                 }
                 out.push(r);
             }
+        }
+        if total > 0 && missing == total {
+            return Err(ApiError::new("IO_ERROR", "无法读取账号详情"));
         }
     }
     if root.join("cc-switch.db").is_file() {
@@ -342,6 +382,7 @@ fn records(root: &Path) -> Result<Vec<Record>, ApiError> {
     if !recognized
         && !root.join("auth.json").is_file()
         && !root.join("codex_accounts.json").is_file()
+        && !root.join("codex_accounts.sqlite").is_file()
     {
         return Err(err());
     }
@@ -349,7 +390,10 @@ fn records(root: &Path) -> Result<Vec<Record>, ApiError> {
 }
 pub fn list_accounts(root: &Path) -> Result<SourceCatalog, ApiError> {
     let mut accounts = vec![];
-    if root.join("codex_accounts.json").is_file() || root.join("auth.json").is_file() {
+    if root.join("codex_accounts.sqlite").is_file()
+        || root.join("codex_accounts.json").is_file()
+        || root.join("auth.json").is_file()
+    {
         accounts = source::legacy_list_accounts(root)?.accounts;
     }
     accounts.extend(records(root)?.into_iter().map(|r| r.account));
@@ -377,6 +421,10 @@ pub fn resolve_root(root: &Path, kind: &str) -> Result<PathBuf, ApiError> {
     let matches = |p: &Path| match kind {
         "official" => p.join("auth.json").is_file() || p.join(".credentials.json").is_file(),
         "cockpit" => [
+            "codex_accounts.sqlite",
+            "claude_accounts.sqlite",
+            "grok_accounts.sqlite",
+            "antigravity_accounts.sqlite",
             "codex_accounts.json",
             "claude_accounts.json",
             "grok_accounts.json",
@@ -388,6 +436,7 @@ pub fn resolve_root(root: &Path, kind: &str) -> Result<PathBuf, ApiError> {
         "cliproxyapi" | "sub2api" => p.is_dir(),
         _ => false,
     };
+    let mut last_error = None;
     for child in [
         "",
         ".codex",
@@ -400,11 +449,14 @@ pub fn resolve_root(root: &Path, kind: &str) -> Result<PathBuf, ApiError> {
         "data",
     ] {
         let p = root.join(child);
-        if matches(&p) && list_accounts(&p).is_ok() {
-            return p.canonicalize().map_err(|_| err());
+        if matches(&p) {
+            match list_accounts(&p) {
+                Ok(_) => return p.canonicalize().map_err(|_| err()),
+                Err(error) => last_error = Some(error),
+            }
         }
     }
-    Err(err())
+    Err(last_error.unwrap_or_else(err))
 }
 
 #[cfg(test)]
@@ -550,5 +602,118 @@ mod tests {
         let creds = read_credentials(root, &accounts[0].source_id).unwrap();
         assert_eq!(creds.access_token, "synthetic-bom-token");
         assert_eq!(creds.account_email.as_deref(), Some("bom@example.test"));
+    }
+
+    #[test]
+    fn cockpit_sqlite_indices_load_all_platforms_and_preserve_errors() {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path();
+        let create_sqlite = |name: &str, version: &str, current: Option<&str>, id: &str, email: &str| {
+            let db_path = root.join(name);
+            let db = rusqlite::Connection::open(&db_path).unwrap();
+            db.execute_batch(
+                "CREATE TABLE summaries (
+                    source INTEGER NOT NULL, position INTEGER NOT NULL,
+                    account_id TEXT NOT NULL, email TEXT NOT NULL, name TEXT,
+                    created_at INTEGER NOT NULL, last_used INTEGER NOT NULL,
+                    plan_type TEXT, subscription_active_until TEXT,
+                    provider_login TEXT, provider_user_id TEXT, payload TEXT,
+                    PRIMARY KEY(source, position)
+                );
+                CREATE TABLE account_index_state (
+                    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                    state TEXT NOT NULL
+                );",
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO account_index_state VALUES (1, ?1)",
+                [json!({
+                    "source": 0,
+                    "version": version,
+                    "current_id": current,
+                    "detail_schema": 2,
+                    "complete": true
+                })
+                .to_string()],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO summaries (source, position, account_id, email, created_at, last_used) VALUES (0, 0, ?1, ?2, 1, 1)",
+                [id, email],
+            )
+            .unwrap();
+        };
+
+        create_sqlite(
+            "codex_accounts.sqlite",
+            "1.0",
+            Some("codex-a"),
+            "codex-a",
+            "codex@example.test",
+        );
+        write(
+            root,
+            "codex_accounts/codex-a.json",
+            json!({"id":"codex-a","auth_mode":"oauth","account_id":"ws-1","tokens":{"access_token":"tok-codex"}}),
+        );
+        create_sqlite(
+            "antigravity_accounts.sqlite",
+            "2.0",
+            Some("ag-a"),
+            "ag-a",
+            "ag@example.test",
+        );
+        write(
+            root,
+            "accounts/ag-a.json",
+            json!({"id":"ag-a","token":{"access_token":"tok-ag","project_id":"proj-1"}}),
+        );
+        create_sqlite(
+            "grok_accounts.sqlite",
+            "",
+            None,
+            "grok-a",
+            "grok@example.test",
+        );
+        write(
+            root,
+            "grok_accounts/grok-a.json",
+            json!({"id":"grok-a","auth_mode":"oauth","access_token":"tok-grok"}),
+        );
+
+        let before = std::fs::read(root.join("codex_accounts.sqlite")).unwrap();
+        let resolved = resolve_root(root, "cockpit").unwrap();
+        assert_eq!(resolved, root.canonicalize().unwrap());
+        let accounts = list_accounts(root).unwrap().accounts;
+        assert_eq!(accounts.len(), 3);
+        assert!(accounts.iter().any(|a| a.provider_id == "codex_usage" && a.is_current));
+        assert!(accounts.iter().any(|a| a.provider_id == "antigravity" && a.is_current));
+        assert!(accounts.iter().any(|a| a.provider_id == "grok"));
+        assert_eq!(read_credentials(root, "codex-a").unwrap().access_token, "tok-codex");
+        assert_eq!(
+            read_credentials(root, "antigravity:ag-a").unwrap().access_token,
+            "tok-ag"
+        );
+        assert_eq!(read_credentials(root, "grok:grok-a").unwrap().access_token, "tok-grok");
+        assert_eq!(std::fs::read(root.join("codex_accounts.sqlite")).unwrap(), before);
+
+        // Encrypted detail without key should surface STORAGE_KEY_UNAVAILABLE via resolve_root.
+        write(
+            root,
+            "codex_accounts/codex-a.json",
+            json!({
+                "version": 1,
+                "kind": "codex",
+                "algorithm": "AES-256-GCM",
+                "key_id": "local-secure-account-storage-v1",
+                "nonce": "AAAAAAAAAAAAAAAA",
+                "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }),
+        );
+        assert_eq!(
+            resolve_root(root, "cockpit").err().unwrap().code,
+            "STORAGE_KEY_UNAVAILABLE"
+        );
     }
 }

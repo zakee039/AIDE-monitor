@@ -24,7 +24,9 @@ pub fn discover_root() -> Option<PathBuf> {
 }
 
 fn is_official(root: &Path) -> bool {
-    root.join("auth.json").is_file() && !root.join("codex_accounts.json").is_file()
+    root.join("auth.json").is_file()
+        && !root.join("codex_accounts.json").is_file()
+        && !root.join("codex_accounts.sqlite").is_file()
 }
 
 fn jwt_claims(token: Option<&str>) -> Option<Value> {

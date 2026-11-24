@@ -64,9 +64,14 @@ mod tests {
     use serde_json::json;
     fn quota(now: chrono::DateTime<Utc>, argon: bool) -> AccountQuota {
         let buckets = if argon {
-            json!([{"bucketId":"gemini-argon-wtu-weekly","remainingFraction":0.6,"resetTime":(now + Duration::days(3)).to_rfc3339()}])
+            json!([
+                {"bucketId":"gemini-5h","remainingFraction":0.9,"resetTime":(now + Duration::hours(4)).to_rfc3339()},
+                {"bucketId":"gemini-argon-wtu-weekly","remainingFraction":0.6,"resetTime":(now + Duration::days(3)).to_rfc3339()}
+            ])
         } else {
-            json!([])
+            json!([
+                {"bucketId":"gemini-5h","remainingFraction":0.9,"resetTime":(now + Duration::hours(4)).to_rfc3339()}
+            ])
         };
         crate::adapters::providers::parse(
             &json!({"groups":[{"buckets":buckets}]}),

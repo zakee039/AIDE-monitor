@@ -8,7 +8,6 @@ pub fn source_id(id: &str) -> &str {
 }
 pub fn options(provider: &str) -> &'static [&'static str] {
     match provider {
-        "antigravity" => &["gemini3", "claude", "gemini4"],
         "grok" => &["shared"],
         _ => &[],
     }
@@ -26,9 +25,6 @@ pub fn catalog(provider: &str, windows: &[QuotaWindow], saved: &[PoolOption]) ->
         .map(|id| PoolOption {
             id: (*id).into(),
             label: match *id {
-                "gemini3" => "Gemini 3",
-                "claude" => "Claude",
-                "gemini4" => "Gemini 4",
                 "shared" => "共享额度",
                 _ => id,
             }
@@ -72,7 +68,12 @@ pub fn catalog(provider: &str, windows: &[QuotaWindow], saved: &[PoolOption]) ->
                 .collect(),
         });
     }
-    if options(provider).is_empty() && !result.is_empty() && !result.iter().any(|p| p.id == "base")
+    let has_base = windows.iter().any(|w| w.scope == "base")
+        || saved.iter().any(|p| p.id == "base");
+    if options(provider).is_empty()
+        && has_base
+        && !result.is_empty()
+        && !result.iter().any(|p| p.id == "base")
     {
         result.insert(
             0,
@@ -87,12 +88,13 @@ pub fn catalog(provider: &str, windows: &[QuotaWindow], saved: &[PoolOption]) ->
 pub fn tracks_window(
     provider: &str,
     id: &str,
+    pools: &[PoolOption],
     choices: &BTreeMap<String, Vec<String>>,
     window: &QuotaWindow,
 ) -> bool {
     window.applicability == "required"
         && (window.scope == "base"
-            || selected(provider, id, choices)
+            || selected_for_pools(provider, id, pools, choices)
                 .into_iter()
                 .any(|pool| scope(pool) == window.scope))
 }
@@ -123,15 +125,29 @@ pub fn refresh_ids(
     }
     Ok(ids)
 }
-pub fn selected<'a>(
+pub fn selected_for_pools<'a>(
     provider: &str,
     id: &str,
+    pools: &'a [PoolOption],
     choices: &'a BTreeMap<String, Vec<String>>,
 ) -> Vec<&'a str> {
-    choices
-        .get(id)
-        .map(|pools| pools.iter().map(String::as_str).collect())
-        .unwrap_or_else(|| vec![options(provider).first().copied().unwrap_or("base")])
+    if let Some(chosen) = choices.get(id) {
+        if pools.is_empty() {
+            return chosen.iter().map(String::as_str).collect();
+        }
+        let valid: Vec<&str> = chosen
+            .iter()
+            .map(String::as_str)
+            .filter(|pool| pools.iter().any(|p| p.id == *pool))
+            .collect();
+        if !valid.is_empty() || chosen.is_empty() {
+            return valid;
+        }
+    }
+    if let Some(first) = pools.first() {
+        return vec![first.id.as_str()];
+    }
+    vec![options(provider).first().copied().unwrap_or("base")]
 }
 pub fn project(
     accounts: Vec<AccountSummary>,
@@ -160,7 +176,7 @@ pub fn project_named(
             samples.push(quota);
             continue;
         }
-        for pool in selected(&account.provider_id, &account.id, choices) {
+        for pool in selected_for_pools(&account.provider_id, &account.id, &pools, choices) {
             if !pools.iter().any(|p| p.id == pool) {
                 continue;
             }
@@ -169,19 +185,13 @@ pub fn project_named(
             entry.display_name = if pool == "base" {
                 account.display_name.clone()
             } else {
-                format!(
-                    "{}-{}",
-                    account.display_name,
-                    if options(&account.provider_id).contains(&pool) {
-                        pool
-                    } else {
-                        pools
-                            .iter()
-                            .find(|p| p.id == pool)
-                            .map(|p| p.label.as_str())
-                            .unwrap_or(pool)
-                    }
-                )
+                let pool_label = pools
+                    .iter()
+                    .find(|p| p.id == pool)
+                    .map(|p| p.label.as_str())
+                    .filter(|label| !label.is_empty())
+                    .unwrap_or(pool);
+                format!("{}-{pool_label}", account.display_name)
             };
             if let Some(name) = aliases
                 .get(&entry.id)
@@ -258,11 +268,17 @@ mod tests {
     }
     #[test]
     fn independent_pools_preserve_values_ids_errors_and_weekly_only_argon() {
-        let mut q = crate::adapters::providers::parse(&json!({"groups":[{"buckets":[
-            {"bucketId":"gemini-5h","remainingFraction":0.8}, {"bucketId":"gemini-weekly","remainingFraction":0.7},
-            {"bucketId":"3p-5h","remainingFraction":0.3}, {"bucketId":"3p-weekly","remainingFraction":0.2},
-            {"bucketId":"gemini-argon-wtu-weekly","remainingFraction":0.6}
-        ]}]}), "antigravity", "a", Utc::now()).unwrap();
+        let mut q = crate::adapters::providers::parse(&json!({"groups":[
+            {"displayName":"Gemini Models","buckets":[
+                {"bucketId":"gemini-5h","remainingFraction":0.8}, {"bucketId":"gemini-weekly","remainingFraction":0.7}
+            ]},
+            {"displayName":"Claude and GPT models","buckets":[
+                {"bucketId":"3p-5h","remainingFraction":0.3}, {"bucketId":"3p-weekly","remainingFraction":0.2}
+            ]},
+            {"displayName":"Gemini 4 Argon","buckets":[
+                {"bucketId":"gemini-argon-wtu-weekly","remainingFraction":0.6}
+            ]}
+        ]}), "antigravity", "a", Utc::now()).unwrap();
         q.error = Some(ApiError::new("NETWORK_ERROR", "test"));
         let choices = BTreeMap::from([(
             "a".into(),
@@ -274,7 +290,11 @@ mod tests {
                 .iter()
                 .map(|a| a.display_name.as_str())
                 .collect::<Vec<_>>(),
-            ["name-gemini3", "name-claude", "name-gemini4"]
+            [
+                "name-Gemini Models",
+                "name-Claude and GPT models",
+                "name-Gemini 4 Argon"
+            ]
         );
         assert_eq!(
             quotas.iter().map(|q| q.windows.len()).collect::<Vec<_>>(),
@@ -288,12 +308,23 @@ mod tests {
         assert!(accounts.iter().all(|a| source_id(&a.id) == "a"));
     }
     #[test]
-    fn old_settings_default_to_gemini_and_missing_argon_is_unknown() {
-        let (a, _) = project(vec![account()], vec![], &BTreeMap::new());
+    fn old_settings_default_to_first_discovered_pool_and_missing_argon_is_unknown() {
+        let mut discovered = account();
+        discovered.pools = vec![
+            PoolOption {
+                id: "gemini3".into(),
+                label: "Gemini Models".into(),
+            },
+            PoolOption {
+                id: "gemini4".into(),
+                label: "Gemini 4 Argon".into(),
+            },
+        ];
+        let (a, _) = project(vec![discovered.clone()], vec![], &BTreeMap::new());
         assert_eq!(a.len(), 1);
-        assert_eq!(a[0].display_name, "name-gemini3");
+        assert_eq!(a[0].display_name, "name-Gemini Models");
         let choices = BTreeMap::from([("a".into(), vec!["gemini4".into()])]);
-        let (_, q) = project(vec![account()], vec![], &choices);
+        let (_, q) = project(vec![discovered], vec![], &choices);
         assert!(!q[0].base_coverage_complete);
         assert_eq!(q[0].windows[0].remaining_percent, None);
         assert_eq!(q[0].windows[0].resets_at, None);
@@ -301,8 +332,19 @@ mod tests {
     }
     #[test]
     fn refresh_resolves_selected_pools_once_and_rejects_unselected_suffixes() {
+        let mut discovered = account();
+        discovered.pools = vec![
+            PoolOption {
+                id: "gemini3".into(),
+                label: "Gemini Models".into(),
+            },
+            PoolOption {
+                id: "claude".into(),
+                label: "Claude and GPT models".into(),
+            },
+        ];
         let choices = BTreeMap::from([("a".into(), vec!["gemini3".into(), "claude".into()])]);
-        let (displayed, _) = project(vec![account()], vec![], &choices);
+        let (displayed, _) = project(vec![discovered], vec![], &choices);
         let physical = vec!["a".into()];
         assert_eq!(
             refresh_ids(

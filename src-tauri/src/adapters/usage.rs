@@ -35,10 +35,10 @@ pub async fn fetch_quota(
     let mut quota =
         read_provider_response(response, hud_account_id, &credentials.provider).await?;
     if credentials.provider == "antigravity"
-        && quota
+        && !quota
             .windows
             .iter()
-            .any(|w| w.id == "gemini-5h" && w.remaining_percent.is_none())
+            .any(|w| w.id == "gemini-5h" && w.remaining_percent.is_some())
     {
         if let Ok(req) = super::providers::antigravity_models_request(client, credentials) {
             if let Ok(resp) = req.send().await {

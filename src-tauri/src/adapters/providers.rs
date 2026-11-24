@@ -165,10 +165,10 @@ pub fn plan_type(v: &Value) -> Option<String> {
     .map(str::to_owned)
 }
 
-// Pool identity comes from the bucket ID, never from a translated group name.
+// Pool identity comes from the bucket ID; display labels preserve the server's original names.
 fn antigravity_windows(v: &Value) -> Result<Vec<QuotaWindow>, ApiError> {
     use sha2::{Digest, Sha256};
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashSet};
     let groups = v
         .get("groups")
         .or_else(|| v.pointer("/response/groups"))
@@ -176,82 +176,90 @@ fn antigravity_windows(v: &Value) -> Result<Vec<QuotaWindow>, ApiError> {
         .ok_or_else(|| ApiError::new("RESPONSE_UNSUPPORTED", "未返回额度汇总"))?;
     let mut grouped: BTreeMap<(String, String), Vec<&Value>> = BTreeMap::new();
     let mut metadata = BTreeMap::new();
+    let mut order: Vec<(String, String)> = Vec::new();
     let mut count = 0;
-    for b in groups
-        .iter()
-        .filter_map(|g| g.get("buckets").and_then(Value::as_array))
-        .flatten()
-    {
-        count += 1;
-        if count > 500 {
-            return Err(ApiError::new(
-                "RESPONSE_UNSUPPORTED",
-                "额度桶数量超出支持范围",
-            ));
-        }
-        let Some(id) = b
-            .get("bucketId")
-            .or_else(|| b.get("id"))
-            .and_then(Value::as_str)
-            .filter(|id| !id.is_empty() && id.len() <= 160 && !id.chars().any(char::is_control))
-        else {
+    for g in groups {
+        let Some(buckets) = g.get("buckets").and_then(Value::as_array) else {
             continue;
         };
-        let (root, period, mut duration) = bucket_period(id);
-        if duration.is_none() {
-            duration = b
-                .get("durationSeconds")
-                .or_else(|| b.get("duration_seconds"))
-                .and_then(Value::as_u64)
-                .filter(|n| (1..=366 * 86400).contains(n));
-        }
-        let (family, label) = match root {
-            "gemini" => ("gemini".to_owned(), "Gemini".to_owned()),
-            "3p" | "claude" => ("claude".to_owned(), "Claude".to_owned()),
-            "argon" | "gemini-argon-wtu" | "gemini-argon" | "gemini-4-argon" | "gemini-4" => {
-                ("gemini4".to_owned(), "Gemini 4".to_owned())
+        let group_name = g
+            .get("displayName")
+            .or_else(|| g.get("display_name"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && s.len() <= 160 && !s.chars().any(char::is_control));
+
+        let mut parsed_buckets = Vec::new();
+        let mut group_families = HashSet::new();
+        for b in buckets {
+            count += 1;
+            if count > 500 {
+                return Err(ApiError::new(
+                    "RESPONSE_UNSUPPORTED",
+                    "额度桶数量超出支持范围",
+                ));
             }
-            _ if root.starts_with("gemini-argon-")
-                || root.starts_with("gemini-4-argon-")
-                || root.starts_with("argon-") =>
-            {
-                ("gemini4".to_owned(), "Gemini 4".to_owned())
+            let Some(id) = b
+                .get("bucketId")
+                .or_else(|| b.get("id"))
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty() && id.len() <= 160 && !id.chars().any(char::is_control))
+            else {
+                continue;
+            };
+            let (root, period, mut duration) = bucket_period(id);
+            if duration.is_none() {
+                duration = b
+                    .get("durationSeconds")
+                    .or_else(|| b.get("duration_seconds"))
+                    .and_then(Value::as_u64)
+                    .filter(|n| (1..=366 * 86400).contains(n));
             }
-            _ => (
-                format!("bucket-{:x}", Sha256::digest(root.as_bytes())),
-                root.to_owned(),
-            ),
-        };
-        let period = if period.is_empty() && family == "gemini4" {
-            duration = Some(604800);
-            "weekly"
-        } else {
-            period
-        };
-        let key = (family, period.to_owned());
-        metadata.entry(key.clone()).or_insert((label, duration));
-        grouped.entry(key).or_default().push(b);
-    }
-    // Preserve legacy selectable pools before their first successful measurement.
-    for family in ["gemini", "claude"] {
-        for (period, duration) in [("5h", 18000), ("weekly", 604800)] {
-            let key = (family.to_owned(), period.to_owned());
-            metadata.entry(key.clone()).or_insert((
-                if family == "gemini" {
-                    "Gemini"
-                } else {
-                    "Claude"
+            let family = match root {
+                "gemini" => "gemini".to_owned(),
+                "3p" | "claude" => "claude".to_owned(),
+                "argon" | "gemini-argon-wtu" | "gemini-argon" | "gemini-4-argon" | "gemini-4" => {
+                    "gemini4".to_owned()
                 }
-                .into(),
-                Some(duration),
-            ));
-            grouped.entry(key).or_default();
+                _ if root.starts_with("gemini-argon-")
+                    || root.starts_with("gemini-4-argon-")
+                    || root.starts_with("argon-") =>
+                {
+                    "gemini4".to_owned()
+                }
+                _ => format!("bucket-{:x}", Sha256::digest(root.as_bytes())),
+            };
+            let period = if period.is_empty() && family == "gemini4" {
+                duration = Some(604800);
+                "weekly"
+            } else {
+                period
+            };
+            group_families.insert(family.clone());
+            parsed_buckets.push((b, root, family, period, duration));
+        }
+
+        let use_group_name = group_families.len() == 1;
+        for (b, root, family, period, duration) in parsed_buckets {
+            let label = if use_group_name {
+                group_name.unwrap_or(root).to_owned()
+            } else {
+                root.to_owned()
+            };
+            let key = (family, period.to_owned());
+            if !metadata.contains_key(&key) {
+                order.push(key.clone());
+            }
+            metadata.entry(key.clone()).or_insert((label, duration));
+            grouped.entry(key).or_default().push(b);
         }
     }
-    Ok(grouped
+    Ok(order
         .into_iter()
-        .map(|((family, period), buckets)| {
-            let (label, duration) = &metadata[&(family.clone(), period.clone())];
+        .map(|key| {
+            let (family, period) = &key;
+            let buckets = &grouped[&key];
+            let (label, duration) = &metadata[&key];
             let values: Option<Vec<f64>> = buckets
                 .iter()
                 .map(|b| {
@@ -274,7 +282,11 @@ fn antigravity_windows(v: &Value) -> Result<Vec<QuotaWindow>, ApiError> {
             });
             let mut w = window(
                 &format!("{family}-{period}"),
-                &format!("{label} · {period}"),
+                &if period.is_empty() {
+                    label.clone()
+                } else {
+                    format!("{label} · {period}")
+                },
                 &format!("feature:{family}"),
                 remaining,
                 reset,
@@ -294,13 +306,13 @@ fn antigravity_windows(v: &Value) -> Result<Vec<QuotaWindow>, ApiError> {
 /// When `retrieveUserQuotaSummary` omits the Gemini 5h pool, supplement `gemini-5h` from
 /// `fetchAvailableModels` without inventing weekly or Gemini 4 Argon windows.
 pub fn supplement_antigravity_models(quota: &mut AccountQuota, models_response: &Value) {
-    let Some(target) = quota
+    if quota
         .windows
-        .iter_mut()
-        .find(|w| w.id == "gemini-5h" && w.remaining_percent.is_none())
-    else {
+        .iter()
+        .any(|w| w.id == "gemini-5h" && w.remaining_percent.is_some())
+    {
         return;
-    };
+    }
     let Some(models) = models_response
         .get("models")
         .or_else(|| models_response.pointer("/response/models"))
@@ -344,11 +356,34 @@ pub fn supplement_antigravity_models(quota: &mut AccountQuota, models_response: 
         ) else {
             continue;
         };
-        target.remaining_percent = Some(rem);
-        target.measurement = "percent".into();
-        target.exhausted = Some(rem == 0.0);
-        if target.resets_at.is_none() {
-            target.resets_at = date(info.get("resetTime").or_else(|| info.get("reset_time")));
+        let reset = date(info.get("resetTime").or_else(|| info.get("reset_time")));
+        if let Some(target) = quota
+            .windows
+            .iter_mut()
+            .find(|w| w.id == "gemini-5h" && w.remaining_percent.is_none())
+        {
+            target.remaining_percent = Some(rem);
+            target.measurement = "percent".into();
+            target.exhausted = Some(rem == 0.0);
+            if target.resets_at.is_none() {
+                target.resets_at = reset;
+            }
+        } else {
+            let pool_label = quota
+                .windows
+                .iter()
+                .find(|w| w.scope == "feature:gemini")
+                .and_then(|w| w.label.split(" · ").next())
+                .unwrap_or("gemini")
+                .to_owned();
+            quota.windows.push(window(
+                "gemini-5h",
+                &format!("{pool_label} · 5h"),
+                "feature:gemini",
+                Some(rem),
+                reset,
+                Some(18000),
+            ));
         }
         break;
     }
@@ -844,14 +879,8 @@ mod tests {
             Utc::now(),
         )
         .unwrap();
-        assert_eq!(
-            q.windows
-                .iter()
-                .find(|w| w.id == "gemini-5h")
-                .unwrap()
-                .remaining_percent,
-            None
-        );
+        assert!(q.windows.iter().all(|w| w.scope == "feature:claude"));
+        assert_eq!(q.windows[0].label, "Claude and GPT models · weekly");
         let models = json!({
             "models": {
                 "a_internal_gemini": {"isInternal": true, "quotaInfo": {"remainingFraction": 0.1}},
@@ -868,14 +897,7 @@ mod tests {
         assert_eq!(g5h.measurement, "percent");
         assert_eq!(g5h.exhausted, Some(false));
         assert_eq!(g5h.resets_at.as_deref(), Some("2026-10-31T12:46:31+00:00"));
-        assert_eq!(
-            q.windows
-                .iter()
-                .find(|w| w.id == "gemini-weekly")
-                .unwrap()
-                .remaining_percent,
-            None
-        );
+        assert!(q.windows.iter().all(|w| w.id != "gemini-weekly"));
         assert!(q.windows.iter().all(|w| w.scope != "feature:gemini4"));
     }
     #[test]
